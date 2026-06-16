@@ -1,0 +1,4 @@
+model_type: bidirectional_entailment_clusterer
+cross_encoder_key: "cross-encoder/nli-deberta-v3-base"
+exemplar_selection_method: "random"
+entailment_threshold: 0.5

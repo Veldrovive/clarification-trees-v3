@@ -1,0 +1,7 @@
+model_type: sentence_transformers_clusterer
+model_name: all-MiniLM-L6-v2
+sentence_transformers_key: all-MiniLM-L6-v2
+
+similarity_threshold: 0.80
+clustering_method: "agglomerative"
+exemplar_selection_method: "random"  # "closest_to_mean", "longest", "shortest", "random"

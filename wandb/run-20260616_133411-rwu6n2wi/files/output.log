@@ -1,0 +1,78 @@
+Random seed set to 42 (CUDA: True, MPS: False)
+[2026-06-16 13:34:12,339][train_clarification_lora.py][INFO] - Saving LoRA checkpoints to /scratch4/home/adempst/projects/clarification-trees-v3/weights/test/qwen_3_vl_32b_clarification_lora_bfloat16
+[2026-06-16 13:34:12,350][train_clarification_lora.py][INFO] - Starting training: 10 epochs, 4333 batches/epoch
+[2026-06-16 13:34:12,350][train_clarification_lora.py][INFO] - Evaluating before training...
+Validation Loss:   0%|                                                                                                  | 0/250 [00:00<?, ?it/s]
+Error executing job with overrides: []
+Traceback (most recent call last):
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/scripts/training/train_clarification_lora.py", line 371, in main
+    train_loop(model, train_loader, val_loader, cfg)
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/scripts/training/train_clarification_lora.py", line 243, in train_loop
+    best_val_loss = evaluate(model, val_loader, device, global_step)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/scripts/training/train_clarification_lora.py", line 97, in evaluate
+    outputs = model.peft_model(
+              ^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/peft/peft_model.py", line 945, in forward
+    return self.get_base_model()(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 903, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1389, in forward
+    outputs = self.model(
+              ^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 903, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1195, in forward
+    image_outputs: BaseModelOutputWithDeepstackFeatures = self.get_image_features(
+                                                          ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 957, in wrapper
+    return func(*args, **translated)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 903, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 1063, in get_image_features
+    vision_output: BaseModelOutputWithDeepstackFeatures = self.visual(
+                                                          ^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 1032, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/utils/output_capturing.py", line 252, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/models/qwen3_vl/modeling_qwen3_vl.py", line 692, in forward
+    bilinear_indices, bilinear_weights = get_vision_bilinear_indices_and_weights(
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch4/home/adempst/projects/clarification-trees-v3/.venv/lib/python3.12/site-packages/transformers/vision_utils.py", line 177, in get_vision_bilinear_indices_and_weights
+    for t, h, w in grid_thw.tolist():
+        ^^^^^^^
+TypeError: cannot unpack non-iterable int object
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.

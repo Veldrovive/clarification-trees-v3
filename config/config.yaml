@@ -1,0 +1,62 @@
+# training:
+#   epochs: 5
+#   seed: 42
+#   device: 'cuda:7'
+#   batch_size: 1
+#   lr: 2e-4
+#   weight_decay: 0.01
+#   gradient_accumulation_steps: 10
+#   max_grad_norm: 1.0
+#   warmup_ratio: 0.03
+
+seed: 42
+
+dialog_tree:
+  max_depth: 3
+  question_expansion_factor: 3
+  answer_expansion_factor: 1
+  question_diverse_sample_count: 5  # Questions are generally naturally diverse so 5 samples should produce at least 2 clusters
+  answer_diverse_sample_count: 5  # Answers are generally not very diverse, but when there is only one answer there is only one answer.
+  inference_diverse_sample_count: 5
+  # There being multiple answers often indicates that the model is trying to give away the answer.
+  
+
+devices:
+  clarification: [6]
+  answer: [5]
+  # clarification: [0]
+  # answer: [1]
+  semantic_cluster: [5]
+
+remote_vllm:
+  clarification:
+    port: 29002
+    gpu_memory_utilization: 0.90
+    max_lora_rank: 16
+    max_model_len: 4096  #8192
+    log_file: "clarification_vllm_remote.log"
+  answer:
+    port: 29003
+    gpu_memory_utilization: 0.90
+    max_lora_rank: 16
+    max_model_len: 4096  #8192
+    log_file: "answer_vllm_remote.log"
+
+defaults:
+  - _self_       # 2. Let the rest of this YAML file override the schema defaults
+  # - clarification_model: qwen_3_vl_32b_lora_small
+  # - clarification_model: qwen_3_vl_32b_prompt_tune
+  # - clarification_model: qwen_3_vl_8b_lora_no_quant
+  - clarification_model: qwen_3_vl_32b_lora_bfloat16
+  - answer_model: qwen_3_vl_32b
+  - semantic_cluster_model: bidirectional_entailment_clusterer
+
+paths:
+  data:
+    trees_subpath: test
+  checkpoints:
+    loras_subpath: test
+
+runtime_meta:
+  git_commit: null
+  git_strict: true

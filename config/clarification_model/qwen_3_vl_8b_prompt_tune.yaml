@@ -1,0 +1,66 @@
+model_type: huggingface
+model_name: qwen-3-vl-8b
+model_hf_transformers_key: Qwen/Qwen3-VL-8B-Instruct
+base_prompt: ""  # Empty prompt for prompt tuning
+use_flash_attention: false
+max_new_tokens: 128
+
+image_resize_config:
+  # width: 384
+  # height: 384
+  width: 512
+  height: 512
+  pad_color: [0, 0, 0]
+
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: "float32"
+
+lora_config:
+  use_lora: false
+  lora_id: null
+
+  training_config:
+    epochs: 5
+    evaluate_first: true
+    seed: 42
+    device: 'cuda:7'
+    batch_size: 1
+    lr: 2e-4
+    weight_decay: 0.01
+    gradient_accumulation_steps: 10
+    max_grad_norm: 1.0
+    warmup_ratio: 0.03
+    patience: 5
+
+  peft_config:
+    r: 8
+    lora_alpha: 16
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+prompt_tuning_config:
+  use_prompt_tuning: true
+  prompt_tuning_id: qwen_3_vl_8b_soft_prompt
+  
+  training_config:
+    epochs: 10
+    evaluate_first: true
+    seed: 42
+    device: 'cuda:6'
+    batch_size: 1
+    lr: 1e-2 # Prompt tuning usually requires higher LR than LoRA
+    weight_decay: 0.0
+    gradient_accumulation_steps: 10
+    max_grad_norm: 1.0
+    warmup_ratio: 0.03
+    patience: 3
+
+  peft_config:
+    task_type: "CAUSAL_LM"
+    num_virtual_tokens: 20
+    prompt_tuning_init: "TEXT" # RANDOM or TEXT
+    prompt_tuning_init_text: "You are an agent designed to ask clarifying questions to better understand a user's query."
+    tokenizer_name_or_path: ${clarification_model.model_hf_transformers_key}

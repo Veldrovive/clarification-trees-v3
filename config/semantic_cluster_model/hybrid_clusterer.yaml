@@ -1,0 +1,6 @@
+model_type: hybrid_clusterer
+sentence_transformers_key: "all-MiniLM-L6-v2"
+cross_encoder_key: "cross-encoder/nli-deberta-v3-base"
+similarity_threshold: 0.10
+entailment_threshold: 0.3
+exemplar_selection_method: "shortest"

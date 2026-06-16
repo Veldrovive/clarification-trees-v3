@@ -1,0 +1,345 @@
+_wandb:
+    value:
+        cli_version: 0.27.2
+        e:
+            drp8aj11xhsr78k2mtrsy22uy1k3nzwp:
+                codePath: scripts/training/train_clarification_lora.py
+                codePathLocal: scripts/training/train_clarification_lora.py
+                cpu_count: 112
+                cpu_count_logical: 112
+                cudaVersion: "12.4"
+                disk:
+                    /:
+                        total: "105089261568"
+                        used: "43989016576"
+                email: aidan.dempster@gmail.com
+                executable: /scratch4/home/adempst/projects/clarification-trees-v3/.venv/bin/python3
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 8
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-3e93ae99-3ed7-af4d-6571-30465210bdc3
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-6ae899c6-f8d9-5ea0-9263-0ead39bf5dca
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-9eef949e-cac8-bec4-e04a-694b67464bee
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-f3156dcb-95a4-40a4-f862-d41a7067805b
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-4f54d4eb-c74a-69e7-9107-b0c1267a4cd2
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-0dafe9d6-b8e5-72e3-a438-a49bec3cc2f9
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-4805c461-9719-ae24-344f-81b09dcca847
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-64415448-6785-fb35-b07e-52c432a63768
+                host: lgn9
+                memory:
+                    total: "2164149325824"
+                os: Linux-6.8.0-90-generic-x86_64-with-glibc2.39
+                program: /scratch4/home/adempst/projects/clarification-trees-v3/scripts/training/train_clarification_lora.py
+                python: CPython 3.12.3
+                root: /scratch4/home/adempst/projects/clarification-trees-v3
+                startedAt: "2026-06-16T17:39:22.476238Z"
+                writerId: drp8aj11xhsr78k2mtrsy22uy1k3nzwp
+        m: []
+        python_version: 3.12.3
+        t:
+            "1":
+                - 1
+                - 5
+                - 11
+                - 33
+                - 41
+                - 49
+                - 50
+                - 53
+                - 71
+                - 75
+                - 98
+            "2":
+                - 1
+                - 5
+                - 11
+                - 33
+                - 41
+                - 49
+                - 50
+                - 53
+                - 71
+                - 75
+                - 98
+            "3":
+                - 13
+                - 16
+            "4": 3.12.3
+            "5": 0.27.2
+            "6": 5.10.2
+            "12": 0.27.2
+            "13": linux-x86_64
+answer_model:
+    value:
+        answer_base_prompt: |
+            You are pretending to be a human in a dialog with an AI assistant.
+            Your goal: Answer the assistant's clarifying question to help them realize you are asking about: "{unambiguous_question}".
+
+            Constraints:
+            1. Answer the clarifying question honestly.
+            2. Include only minimal information to help the assistant. You are training the assistant to ask good questions.
+            3. CRITICAL: Do NOT simply state the answer to the unambiguous question (e.g., do not say the number, name, or specific value).
+            4. Only describe the location, color, or type of object you are interested in.
+            5. Answer vague questions with vague answers. Provide only the information that was asked for.
+
+            Examples:
+            Image - A bowl of fruit on a table with a red apple on the left, a green apple on the right, a banana, and an orange.
+            Unambiguous Question - "What color is the apple on the right"
+            Ambiguous Question - "What color is it?"
+            Allowed Answers - ["green"]
+
+            Clarifying Question - "Are you talking about an apple"
+            Good Answer - "Yes"
+            Bad Answer - "Yes, the apple on the right"
+            Additional information is witheld.
+
+            Clarifying Question - "Are you talking about the apple on the left"
+            Good Answer - "No" or "No, I am talking about the apple on the right"
+            Question is asking about location, so location can be included in the answer.
+
+            Current Context:
+            Allowed Answers: {answers}
+
+            Given next is the full conversation:
+        answer_instruction_prompt: |
+            Please write the response to the clarifying question above as if you were the user described in the system prompt. Reply directly with the clarification text only. Your text should start with something like 'Regarding your question, I am asking about ', 'Yes, ...' or 'No, ...'. Be short and concise. Provide only the information asked for in the clarifying question and obscure the rest of the information as much as possible. Use only words that do not appear in the final answer.
+        bnb_config:
+            bnb_4bit_compute_dtype: float32
+            bnb_4bit_quant_type: nf4
+            bnb_4bit_use_double_quant: true
+            load_in_4bit: true
+        image_resize_config:
+            height: 512
+            pad_color:
+                - 0
+                - 0
+                - 0
+            width: 512
+        inference_base_prompt: |
+            You are an agent in dialog with a user who has asked a question about an image.
+            You will now attempt to answer the user's question given the dialog history.
+
+            Constraints:
+            1. You provide a single answer to the user's question.
+            2. You should answer in a few words only.
+            3. You must immediately answer the question with no follow-up questions.
+        inference_instruction_prompt: |
+            Please write the response to the user's question above as if you were the user described in the system prompt. Reply directly with the answer text only. Be short and concise. Answers should be a couple of words only.
+        judge_prompts:
+            base_prompt: |
+                You are an expert evaluator for a Visual Question Answering (VQA) system. Your task is to score how well a machine-generated "Inference Response" answers a specific "Unambiguous Question" given a "Gold Answer" and context.
+
+                **Evaluation Criteria:**
+                - **Accuracy (10/10):** The response matches the Gold Answer in meaning and factuality.
+                - **Partial Accuracy (5-6/10):** The response contains the correct answer but also includes incorrect information or distractors.
+                - **Equivalent Meaning (9-10/10):** The response is phrased differently but means exactly the same thing as the Gold Answer in this context.
+                - **Incorrect (0/10):** The response is factually wrong, irrelevant, or answers a different interpretation of the question.
+
+                **Input Data:**
+                - **Unambiguous Question:** The precise question being asked.
+                - **Gold Answer:** The correct ground truth.
+                - **Image Caption:** Context from the image.
+                - **Inference Response:** The answer generated by the model.
+
+                **Examples:**
+
+                Example 1:
+                Unambiguous Question: What are the clear circles on the front of the car made of?
+                Gold Answer: glass
+                Image Caption: a blue and white truck parked next to a crowd of people
+                Inference Response: Metal and paint.
+                Reasoning: Neither metal nor paint are correct or equivalent to glass.
+                Score: 0
+
+                Example 2:
+                Unambiguous Question: What are the clear circles on the front of the car made of?
+                Gold Answer: glass
+                Image Caption: a blue and white truck parked next to a crowd of people
+                Inference Response: Glass and metal.
+                Reasoning: Glass is correct, but metal is incorrect.
+                Score: 5
+
+                Example 3:
+                Unambiguous Question: Where should the reflective items on the peoples high foreheads really be?
+                Gold Answer: over eyes
+                Image Caption: a man posing with a child on skis
+                Inference Response: On their heads, above eyes.
+                Reasoning: Answer is equivalent to correct answer
+                Score: 10
+
+                Example 4:
+                Unambiguous Question: There is a large white structure with which animal directly in front of it?
+                Gold Answer: zebra
+                Image Caption: a giraffe standing in the middle of a lush green field
+                Inference Response: Giraffe
+                Reasoning: The giraffe is present, but not in front of the white structure
+                Score: 0
+            instruction_prompt: |
+                **Current Task:**
+                Unambiguous Question: {unambiguous_question}
+                Gold Answer: {gold_answer}
+                All Human Answers: {answers}
+                Image Caption: {caption}
+                Inference Response: {inference_response}
+
+                **Output Format:**
+                Reasoning: [One very short sentence explaining the judgement. Maximum 10 words]
+                Score: [0-10]
+            n_judgements: 5
+        lora_config:
+            lora_id: null
+            peft_config: null
+            training_config: null
+            use_lora: false
+        max_new_tokens: 128
+        model_hf_transformers_key: Qwen/Qwen3-VL-32B-Instruct
+        model_name: qwen-3-vl-32b
+        model_type: huggingface
+        torch_dtype: null
+        use_flash_attention: false
+clarification_model:
+    value:
+        base_prompt: You are an agent designed to ask clarifying questions to better understand a user's query.
+        bnb_config:
+            bnb_4bit_compute_dtype: bfloat16
+            bnb_4bit_quant_type: nf4
+            bnb_4bit_use_double_quant: true
+            load_in_4bit: true
+        image_resize_config:
+            height: 512
+            pad_color:
+                - 0
+                - 0
+                - 0
+            width: 512
+        lora_config:
+            lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
+            peft_config:
+                lora_alpha: 16
+                lora_dropout: 0.05
+                r: 8
+                target_modules:
+                    - q_proj
+                    - k_proj
+                    - v_proj
+                    - o_proj
+                    - gate_proj
+                    - up_proj
+                    - down_proj
+            training_config:
+                batch_size: 4
+                device: cuda
+                epochs: 10
+                evaluate_first: true
+                gradient_accumulation_steps: 4
+                lr: 0.0001
+                max_grad_norm: 1
+                patience: 2
+                seed: 42
+                warmup_ratio: 0.03
+                weight_decay: 0.01
+            use_lora: true
+        max_new_tokens: 128
+        model_hf_transformers_key: Qwen/Qwen3-VL-32B-Instruct
+        model_name: qwen-3-vl-32b
+        model_type: huggingface
+        rl_config:
+            training_config:
+                batch_size: 1
+                beta: 0.01
+                clip_eps: 0.2
+                device: cuda:0
+                epochs: 2
+                evaluate_first: true
+                gradient_accumulation_steps: 1
+                lr: 0.0001
+                max_grad_norm: 1
+                max_train_steps: 200
+                max_val_steps: 40
+                n_generation_samples: 10
+                seed: 42
+                train_split_ratio: 0.8
+                warmup_ratio: 0
+                weight_decay: 0
+        torch_dtype: null
+        use_flash_attention: false
+devices:
+    value:
+        answer:
+            - 5
+        clarification:
+            - 6
+        semantic_cluster:
+            - 5
+dialog_tree:
+    value:
+        answer_diverse_sample_count: 5
+        answer_expansion_factor: 1
+        inference_diverse_sample_count: 5
+        max_depth: 3
+        question_diverse_sample_count: 5
+        question_expansion_factor: 3
+paths:
+    value:
+        checkpoints:
+            loras_subpath: test
+        data:
+            trees_subpath: test
+remote_vllm:
+    value:
+        answer:
+            gpu_memory_utilization: 0.9
+            log_file: answer_vllm_remote.log
+            max_lora_rank: 16
+            max_model_len: 4096
+            port: 29003
+        clarification:
+            gpu_memory_utilization: 0.9
+            log_file: clarification_vllm_remote.log
+            max_lora_rank: 16
+            max_model_len: 4096
+            port: 29002
+runtime_meta:
+    value:
+        git_commit: null
+        git_strict: true
+seed:
+    value: 42
+semantic_cluster_model:
+    value:
+        cross_encoder_key: cross-encoder/nli-deberta-v3-base
+        entailment_threshold: 0.5
+        exemplar_selection_method: random
+        model_type: bidirectional_entailment_clusterer

@@ -1,0 +1,55 @@
+model_type: huggingface
+model_name: qwen-3-vl-32b
+model_hf_transformers_key: Qwen/Qwen3-VL-32B-Instruct
+base_prompt: "You are an agent designed to ask clarifying questions to better understand a user's query."
+use_flash_attention: false
+max_new_tokens: 128
+
+image_resize_config:
+  # width: 384
+  # height: 384
+  width: 512
+  height: 512
+  pad_color: [0, 0, 0]
+
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: "bfloat16"
+
+rl_config:
+  training_config:
+    epochs: 2
+    evaluate_first: true
+    seed: 42
+    device: 'cuda:6'
+    batch_size: 4
+    lr: 1e-5
+    weight_decay: 0.01
+    gradient_accumulation_steps: 4
+    max_grad_norm: 1.0
+    warmup_ratio: 0.03
+
+lora_config:
+  use_lora: true
+  lora_id: qwen_3_vl_32b_clarification_lora_large_bfloat16
+
+  training_config:
+    epochs: 10
+    evaluate_first: true
+    seed: 42
+    device: 'cuda:6'
+    batch_size: 4
+    lr: 1e-4
+    weight_decay: 0.01
+    gradient_accumulation_steps: 4
+    max_grad_norm: 1.0
+    warmup_ratio: 0.03
+    patience: 2
+
+  peft_config:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

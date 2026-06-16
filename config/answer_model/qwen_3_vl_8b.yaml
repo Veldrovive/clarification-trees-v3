@@ -1,0 +1,30 @@
+model_type: huggingface
+model_name: qwen-3-vl-8b
+model_hf_transformers_key: Qwen/Qwen3-VL-8B-Instruct
+base_prompt: "You are standing in for the user and answering the questions asked by the clarifying agent. Answer the questions truthfully and concisely."
+use_flash_attention: false
+max_new_tokens: 128
+
+image_resize_config:
+  # width: 384
+  # height: 384
+  width: 512
+  height: 512
+  pad_color: [0, 0, 0]
+
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: "float32"
+
+lora_config:
+  use_lora: false
+  lora_id: null
+
+# Defines how a LORA should be trained for this model
+lora_training:
+  r: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

@@ -1,0 +1,6 @@
+model_type: huggingface
+model_name: qwen-3-vl-4b
+model_hf_transformers_key: Qwen/Qwen3-VL-4B-Instruct
+base_prompt: "You are an agent designed to ask clarifying questions to better understand a user's query."
+use_flash_attention: false
+max_new_tokens: 128

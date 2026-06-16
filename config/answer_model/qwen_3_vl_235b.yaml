@@ -1,0 +1,23 @@
+model_type: huggingface
+model_name: qwen-3-vl-235b
+model_hf_transformers_key: Qwen/Qwen3-VL-235B-A22B-Instruct
+base_prompt: "You are pretending to be a human in a question-answer dialog with an AI assistant. Pretend that you have asked an ambiguous question about the provided image and are now in dialog with the agent. Answer the agent's clarifying questions honestly and to the best of your ability without revealing the true answer."
+use_flash_attention: false
+max_new_tokens: 128
+
+image_resize_config:
+  # width: 384
+  # height: 384
+  width: 512
+  height: 512
+  pad_color: [0, 0, 0]
+
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: "float32"
+
+lora_config:
+  use_lora: false
+  lora_id: null
