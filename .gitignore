@@ -1,6 +1,7 @@
 outputs/
 dat/
 weights/
+wandb/
 
 # Python-generated files
 __pycache__/
