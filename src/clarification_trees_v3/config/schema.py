@@ -123,23 +123,6 @@ class BaseModelSourceConfig(BaseModel):
             raise ValueError("merged_lora_id is required when source_type is 'local_merged'")
         return self
 
-    def resolve_base_model_path(self, merged_models_path: Path | None = None) -> str:
-        if self.source_type == "huggingface":
-            assert self.huggingface_key is not None
-            return self.huggingface_key
-        elif self.source_type == "local_merged":
-            assert self.merged_lora_id is not None
-            if merged_models_path is not None:
-                path = merged_models_path / self.merged_lora_id
-            else:
-                assert BASE_WEIGHTS_PATH is not None, "BASE_WEIGHTS_PATH environment variable is required for local merged weights."
-                path = BASE_WEIGHTS_PATH / "merged_models" / self.merged_lora_id
-            if not path.exists():
-                print(f"Warning: Merged local model not found at {path}")
-            return str(path)
-        else:
-            raise ValueError(f"Unknown source type: {self.source_type}")
-
 # --- Clarification Models ---
 
 class BaseClarificationModelConfig(BaseModel):
@@ -213,6 +196,10 @@ class RuntimeMetaConfig(BaseModel):
     git_commit: str | None = None
     git_strict: bool = True
 
+class WandbConfig(BaseModel):
+    project: str
+    name: str | None = None
+
 
 # Define the Discriminated Unions for Polymorphism
 ClarificationModelType = Annotated[
@@ -241,6 +228,7 @@ class Config(BaseModel):
     remote_vllm: RemoteVLLMConfigs
     paths: PathsConfig
     runtime_meta: RuntimeMetaConfig
+    wandb: WandbConfig
 
     clarification_model: ClarificationModelType
     answer_model: AnswerModelType
@@ -255,6 +243,21 @@ def parse_config(cfg: DictConfig) -> Config:
     config = Config(**raw_config_dict)
     
     return config
+
+def resolve_base_model_path(source_config: BaseModelSourceConfig, paths_config: PathsConfig) -> str:
+    if source_config.source_type == "huggingface":
+        assert source_config.huggingface_key is not None
+        return source_config.huggingface_key
+    elif source_config.source_type == "local_merged":
+        assert source_config.merged_lora_id is not None
+        assert BASE_WEIGHTS_PATH is not None, "BASE_WEIGHTS_PATH environment variable is required for local merged weights."
+        
+        path = BASE_WEIGHTS_PATH / paths_config.checkpoints.merged_models_subpath / source_config.merged_lora_id
+        if not path.exists():
+            print(f"Warning: Merged local model not found at {path}")
+        return str(path)
+    else:
+        raise ValueError(f"Unknown source type: {source_config.source_type}")
 
 if __name__ == "__main__":
     # How to integrate this with Hydra

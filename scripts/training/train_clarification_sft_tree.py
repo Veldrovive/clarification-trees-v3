@@ -1,3 +1,4 @@
+import os
 import dotenv
 dotenv.load_dotenv()
 
@@ -14,7 +15,7 @@ import gc
 from omegaconf import DictConfig, OmegaConf
 
 from clarification_trees_v3.config import schema
-from clarification_trees_v3.config.sft_tree_schema import SFTTreeConfig, parse_sft_tree_config, get_base_config
+from clarification_trees_v3.config.sft_tree_schema import SFTTreeConfig, parse_sft_tree_config
 from clarification_trees_v3.models.transformers_model_v2 import TransformersModelV2
 from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory, DialogNode
 from clarification_trees_v3.utils import set_seed
@@ -231,7 +232,8 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
     assert BASE_WEIGHTS_PATH is not None, "BASE_WEIGHTS_PATH is not defined."
     lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(cfg.paths.checkpoints.loras_subpath)
     lora_id = lora_config.lora_id
-    save_dir = lora_checkpoint_path / lora_id
+    iter_number = os.environ.get("ITER_NUMBER", "0")
+    save_dir = lora_checkpoint_path / f"{lora_id}_rl_sft_iter_{iter_number}"
     if save_dir.exists():
         logger.warning(f"LoRA checkpoint directory {save_dir} already exists. Overwrite?")
         if not input("Overwrite? (y/n): ").lower() == "y":
@@ -322,15 +324,31 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
                 break
 
 
-def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig) -> TransformersModelV2:
+def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig, cfg: SFTTreeConfig) -> TransformersModelV2:
     lora_training_config = model_config.lora_config.training_config
     device = lora_training_config.device
 
     logger.info("Loading model...")
-    model = TransformersModelV2(model_config, device)
+    model = TransformersModelV2(model_config, cfg.paths, device)
     
-    print("Adding LoRA to model...")
-    model.construct_lora_adapter(model_config.lora_config.peft_config, adapter_name="default")
+    import os
+    iter_number_str = os.environ.get("ITER_NUMBER", "0")
+    iter_number = int(iter_number_str)
+
+    if iter_number == 0:
+        logger.info(f"Iteration {iter_number}: Initializing a new LoRA adapter...")
+        model.construct_lora_adapter(model_config.lora_config.peft_config, adapter_name="default")
+    else:
+        prev_iter = iter_number - 1
+        assert BASE_WEIGHTS_PATH is not None, "BASE_WEIGHTS_PATH is not defined."
+        lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(cfg.paths.checkpoints.loras_subpath)
+        lora_id = model_config.lora_config.lora_id
+        
+        prev_adapter_path = lora_checkpoint_path / f"{lora_id}_rl_sft_iter_{prev_iter}" / "best_adapter"
+        
+        logger.info(f"Iteration {iter_number}: Loading previous LoRA adapter from {prev_adapter_path}...")
+        model.load_adapter(prev_adapter_path, adapter_name="default", is_trainable=True)
+
     assert model.peft_model is not None, "No adapter was constructed."
     
     train_p, tot_p = model.peft_model.get_nb_trainable_parameters()
@@ -343,7 +361,6 @@ def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModel
 @hydra.main(config_path="../../config", config_name="sft_tree_config", version_base=None)
 def main(raw_cfg: DictConfig):
     cfg: SFTTreeConfig = parse_sft_tree_config(raw_cfg)
-    base_cfg: schema.Config = get_base_config(cfg)
     print(f"Training with config:\n{cfg.model_dump_json(indent=2)}")
 
     model_config = cfg.clarification_model
@@ -353,14 +370,13 @@ def main(raw_cfg: DictConfig):
     logger.info("Starting SFT training for clarification LORA using Tree Dataset")
     logger.info(f"Model config: {model_config}")
 
-    model = construct_model_with_lora(model_config)
+    model = construct_model_with_lora(model_config, cfg)
     collate_fn = get_collate_fn(model)
 
     assert GENERATED_TREES_PATH is not None, "GENERATED_TREES_PATH is required to load tree dataset"
     trees_path = GENERATED_TREES_PATH / cfg.paths.data.trees_subpath
     
     train_ds = SFTClarificationTreeDataset(
-        cfg=base_cfg,
         trees_path=trees_path,
         load_images=cfg.sft_dataset.load_images,
         advantage_threshold=cfg.sft_dataset.advantage_threshold,
@@ -390,10 +406,11 @@ def main(raw_cfg: DictConfig):
         pin_memory=True
     )
 
+    wandb_name = cfg.wandb.name if cfg.wandb.name else lora_id
     wandb.init(
-        project="clarification-sft-tree",
+        project=cfg.wandb.project,
         config=cfg.model_dump(),
-        name=lora_id
+        name=wandb_name
     )
 
     train_loop(model, train_loader, val_loader, cfg)

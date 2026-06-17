@@ -5,11 +5,11 @@ from .transformers_model_v2 import TransformersModelV2
 from .semantic_clustering import SemanticClusterer, BidirectionalEntailmentClusterer, HybridClusterer, Clusterer
 import clarification_trees_v3.config.schema as schema
 
-def construct_model(model_config: schema.ClarificationModelType | schema.AnswerModelType, device: str | int, load_lora: bool = True, loras_path: Path | None = None) -> TransformersModelV2:
+def construct_model(model_config: schema.ClarificationModelType | schema.AnswerModelType, paths_config: schema.PathsConfig, device: str | int, load_lora: bool = True, loras_path: Path | None = None) -> TransformersModelV2:
     """
     Construct a TransformersModelV2 from the given config.
     """
-    model = TransformersModelV2(model_config, device)
+    model = TransformersModelV2(model_config, paths_config, device)
     if load_lora:
         assert loras_path is not None, "LORA/Adapter path must be specified if load_lora is True"
         

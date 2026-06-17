@@ -6,7 +6,7 @@ class ColdStartConfig(BaseModel):
     clarification_model: ClarificationModelType
     paths: PathsConfig
     runtime_meta: RuntimeMetaConfig
-
+    wandb: WandbConfig
 def parse_cold_start_config(cfg: DictConfig) -> ColdStartConfig:
     """Parse the Hydra config into a Pydantic ColdStartConfig object."""
     # 1. Resolve Hydra interpolations and convert to standard dict

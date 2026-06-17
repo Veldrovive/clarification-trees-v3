@@ -523,7 +523,7 @@ class TreeSidecar:
 
         return advantages
 
-    def compute_rewards(self, cfg: schema.Config):
+    def compute_rewards(self):
         """
         We compute rewards using a backtracking DFS.
         We use an optimal stopping criterion to decide where reward comes from.
@@ -537,11 +537,10 @@ class TreeSidecar:
         self.reward_cache = rewards
         self.advantage_cache = self._compute_advantage(tree, rewards)
 
-    def get_node_advantage(self, node_idx: int, cfg: schema.Config | None) -> float:
+    def get_node_advantage(self, node_idx: int) -> float:
         # Check if the advantage cache has been computed
         if node_idx not in self.advantage_cache:
-            assert cfg is not None, "Node not in advantage cache and config not provided"
-            self.compute_rewards(cfg)
+            self.compute_rewards()
         return self.advantage_cache[node_idx]
 
     def get_node_logprobs(self, node_idx: int) -> list[tuple[int, float]]:
@@ -576,7 +575,7 @@ class TreeSidecar:
         tree_sidecar.token_logprobs = {int(k): [tuple(v) for v in vs] for k, vs in data["token_logprobs"].items()}
         return tree_sidecar
 
-def visualize_tree(cfg: schema.Config | None, dialog_tree: DialogTree, tree_sidecar: TreeSidecar | None = None, output_filename: str = "dialog_tree", view: bool = True):
+def visualize_tree(dialog_tree: DialogTree, tree_sidecar: TreeSidecar | None = None, output_filename: str = "dialog_tree", view: bool = True):
     """
     Generates a visual flow diagram of the DialogTree using Graphviz.
     
@@ -604,8 +603,7 @@ def visualize_tree(cfg: schema.Config | None, dialog_tree: DialogTree, tree_side
 
     # Cache the rewards
     if tree_sidecar is not None:
-        assert cfg is not None, "Config must be provided to compute rewards"
-        tree_sidecar.compute_rewards(cfg)
+        tree_sidecar.compute_rewards()
     
     for idx, (parent_idx, node) in enumerate(dialog_tree.nodes):
         
@@ -774,4 +772,4 @@ if __name__ == "__main__":
         for message in trajectory.to_messages("qwen-3-vl-2b", use_img_path=False):
             print(f"\t{message}")
 
-    visualize_tree(None, tree, output_filename="tree_viz", view=False)
+    visualize_tree(tree, output_filename="tree_viz", view=False)

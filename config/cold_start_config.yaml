@@ -15,3 +15,7 @@ paths:
 runtime_meta:
   git_commit: null
   git_strict: true
+
+wandb:
+  project: "clarification-cold-start"
+  name: null

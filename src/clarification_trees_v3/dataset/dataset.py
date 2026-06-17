@@ -107,14 +107,12 @@ class ClarificationTreeDataset(Dataset):
     cached_reward_tree_idxs: set[int]
     
     def __init__(self,
-        cfg: schema.Config | None,
         trees_path: Path | None = GENERATED_TREES_PATH,
         tree_paths: list[Path] | None = None,
         transform = None,
         load_images: bool = True,
         precompute_rewards: bool = True,
     ):
-        self.cfg = cfg
         self.trees_path = trees_path
         self.tree_paths = tree_paths
         self.transform = transform
@@ -165,8 +163,7 @@ class ClarificationTreeDataset(Dataset):
             trees.append(tree)
             sidecars.append(sidecar)
             if self.precompute_rewards:
-                assert self.cfg is not None, "Config must be provided to compute rewards"
-                sidecar.compute_rewards(self.cfg)  # Caches the rewards and advantages
+                sidecar.compute_rewards()  # Caches the rewards and advantages
                 cached_reward_tree_idxs.add(tree_idx)
 
             for parent_node_idx, parent_node in tree.get_nodes():
@@ -213,8 +210,7 @@ class ClarificationTreeDataset(Dataset):
         child_node_idxs = sample["child_node_idxs"]
 
         if tree_index not in self.cached_reward_tree_idxs:
-            assert self.cfg is not None, "Config must be provided to compute rewards"
-            self.sidecars[tree_index].compute_rewards(self.cfg)
+            self.sidecars[tree_index].compute_rewards()
             self.cached_reward_tree_idxs.add(tree_index)
 
         tree = self.trees[tree_index]
@@ -249,14 +245,12 @@ class SFTClarificationTreeDataset(Dataset):
     samples: list[dict]
     
     def __init__(self,
-        cfg: schema.Config | None,
         trees_path: Path | None = GENERATED_TREES_PATH,
         tree_paths: list[Path] | None = None,
         load_images: bool = True,
         advantage_threshold: float | None = None,
         top_n: int | None = None,
     ):
-        self.cfg = cfg
         self.trees_path = trees_path
         self.tree_paths = tree_paths
         self.load_images = load_images
@@ -303,8 +297,7 @@ class SFTClarificationTreeDataset(Dataset):
             trees.append(tree)
             sidecars.append(sidecar)
             
-            assert self.cfg is not None, "Config must be provided to compute rewards for filtering"
-            sidecar.compute_rewards(self.cfg)
+            sidecar.compute_rewards()
 
             for parent_node_idx, parent_node in tree.get_nodes():
                 child_cq_idxs = tree.get_children_idxs(parent_node_idx, type_filter=NodeType.CLARIFICATION_QUESTION)
@@ -358,7 +351,7 @@ if __name__ == "__main__":
     # print(ds[0])
 
     import json
-    ds = ClarificationTreeDataset(cfg=None, precompute_rewards=False)
+    ds = ClarificationTreeDataset(precompute_rewards=False)
     print(f"Dataset size: {len(ds)}")
     sample = ds[1000]
 

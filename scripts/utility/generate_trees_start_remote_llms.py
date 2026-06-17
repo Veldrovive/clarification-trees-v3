@@ -26,8 +26,8 @@ async def start_servers(cfg: Config):
     async def _start_vllm_server(model_cfg, gpus: list[int], port: int, log_file: Path):
         model = RemoteVLLMModel(
             model_cfg,
+            cfg.paths,
             lora_checkpoint_path,
-            merged_models_path=merged_models_path,
             gpus=gpus,
             port=port,
             log_file=log_file

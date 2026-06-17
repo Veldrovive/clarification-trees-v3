@@ -317,12 +317,12 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
                 break
 
 
-def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig) -> TransformersModelV2:
+def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig, cfg: ColdStartConfig) -> TransformersModelV2:
     lora_training_config = model_config.lora_config.training_config
     device = lora_training_config.device
 
     logger.info("Loading model...")
-    model = TransformersModelV2(model_config, device)
+    model = TransformersModelV2(model_config, cfg.paths, device)
     
     print("Adding LoRA to model...")
     model.construct_lora_adapter(model_config.lora_config.peft_config, adapter_name="default")
@@ -347,7 +347,7 @@ def main(cfg: DictConfig):
     logger.info("Starting training for clarification LORA")
     logger.info(f"Model config: {model_config}")
 
-    model = construct_model_with_lora(model_config)
+    model = construct_model_with_lora(model_config, cfg)
     collate_fn = get_collate_fn(model)
 
     train_ds = ClearVQADataset(table_name="train_annotated.jsonl")
@@ -375,10 +375,11 @@ def main(cfg: DictConfig):
         pin_memory=True
     )
 
+    wandb_name = cfg.wandb.name if cfg.wandb.name else lora_id
     wandb.init(
-        project="clarification-cold-start",
+        project=cfg.wandb.project,
         config=cfg.model_dump(),
-        name=lora_id
+        name=wandb_name
     )
 
     train_loop(model, train_loader, val_loader, cfg)

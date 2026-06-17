@@ -1,52 +1,26 @@
 seed: 42
 
-dialog_tree:
-  max_depth: 3
-  question_expansion_factor: 3
-  answer_expansion_factor: 1
-  question_diverse_sample_count: 5
-  answer_diverse_sample_count: 5
-  inference_diverse_sample_count: 5
-
-devices:
-  clarification: [6]
-  answer: [5]
-  semantic_cluster: [5]
-
-remote_vllm:
-  clarification:
-    port: 29002
-    gpu_memory_utilization: 0.90
-    max_lora_rank: 16
-    max_model_len: 4096
-    log_file: "clarification_vllm_remote.log"
-  answer:
-    port: 29003
-    gpu_memory_utilization: 0.90
-    max_lora_rank: 16
-    max_model_len: 4096
-    log_file: "answer_vllm_remote.log"
-
 defaults:
   - _self_
-  - clarification_model/base: qwen_3_vl_32b_lora_bfloat16
+  - clarification_model/base: qwen_3_vl_32b_merged_bfloat16
   - clarification_model/lora: qwen_3_vl_32b_lora_bfloat16
-  - answer_model/base: qwen_3_vl_32b
-  - answer_model/lora: qwen_3_vl_32b
-  - semantic_cluster_model: bidirectional_entailment_clusterer
 
 sft_dataset:
   load_images: true
-  advantage_threshold: null
+  advantage_threshold: 0.5
   top_n: null
 
 paths:
   data:
-    trees_subpath: v1
+    trees_subpath: v2
   checkpoints:
-    loras_subpath: v1/tree_sft_loras
-    merged_models_subpath: v1/tree_sft_merged_models
+    loras_subpath: v2/tree_sft_loras
+    merged_models_subpath: v2/tree_sft_merged_models
 
 runtime_meta:
   git_commit: null
   git_strict: true
+
+wandb:
+  project: "clarification-sft-tree"
+  name: null

@@ -47,7 +47,7 @@ def main(cfg: DictConfig):
     device = "cpu"
 
     logger.info(f"Loading base model ({model_config.model_name}) in {model_config.torch_dtype} on {device}...")
-    model = TransformersModelV2(model_config, device)
+    model = TransformersModelV2(model_config, parsed_cfg.paths, device)
     
     # 4. Load PEFT Adapter directly bypassing prepare_model_for_kbit_training
     logger.info(f"Loading adapter from {adapter_path}...")

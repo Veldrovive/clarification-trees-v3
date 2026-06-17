@@ -34,6 +34,7 @@ class TransformersModelV2:
     def __init__(
         self,
         model_config: schema.ClarificationModelType | schema.AnswerModelType,
+        paths_config: schema.PathsConfig,
         device: str | int
     ):
         self.model_config = model_config
@@ -50,26 +51,26 @@ class TransformersModelV2:
         if self.image_resize_config:
             print(f"Image resizing enabled: {self.image_resize_config}")
 
-        self.base_model, self.processor = self._load_base_model(self.model_config, self.bnb_config)
+        self.base_model, self.processor = self._load_base_model(self.model_config, paths_config, self.bnb_config)
 
     ### BASE MODEL MANAGEMENT ###
-    def _load_base_model(self, model_config: schema.ClarificationModelType | schema.AnswerModelType, bnb_config: Optional[BitsAndBytesConfig] = None) -> tuple[transformers.PreTrainedModel, transformers.PreTrainedTokenizer]:
+    def _load_base_model(self, model_config: schema.ClarificationModelType | schema.AnswerModelType, paths_config: schema.PathsConfig, bnb_config: Optional[BitsAndBytesConfig] = None) -> tuple[transformers.PreTrainedModel, transformers.PreTrainedTokenizer]:
         if model_config.model_name == "qwen-3-vl-2b":
-            base_model, processor = self._load_qwen_vl_model(model_config, bnb_config)
+            base_model, processor = self._load_qwen_vl_model(model_config, paths_config, bnb_config)
         elif model_config.model_name == "qwen-3-vl-4b":
-            base_model, processor = self._load_qwen_vl_model(model_config, bnb_config)
+            base_model, processor = self._load_qwen_vl_model(model_config, paths_config, bnb_config)
         elif model_config.model_name == "qwen-3-vl-8b":
-            base_model, processor = self._load_qwen_vl_model(model_config, bnb_config)
+            base_model, processor = self._load_qwen_vl_model(model_config, paths_config, bnb_config)
         elif model_config.model_name == "qwen-3-vl-32b":
-            base_model, processor = self._load_qwen_vl_model(model_config, bnb_config)
+            base_model, processor = self._load_qwen_vl_model(model_config, paths_config, bnb_config)
         elif model_config.model_name == "qwen-3-vl-235b":
-            base_model, processor = self._load_qwen_vl_model(model_config, bnb_config)
+            base_model, processor = self._load_qwen_vl_model(model_config, paths_config, bnb_config)
         else:
             raise NotImplementedError(f"Model {model_config.model_name} is not implemented")
 
         return base_model, processor
 
-    def _load_qwen_vl_model(self, model_config: schema.ClarificationModelType | schema.AnswerModelType, bnb_config: Optional[BitsAndBytesConfig] = None) -> tuple[transformers.PreTrainedModel, transformers.PreTrainedTokenizer]:
+    def _load_qwen_vl_model(self, model_config: schema.ClarificationModelType | schema.AnswerModelType, paths_config: schema.PathsConfig, bnb_config: Optional[BitsAndBytesConfig] = None) -> tuple[transformers.PreTrainedModel, transformers.PreTrainedTokenizer]:
         try:
             from transformers import Qwen3VLForConditionalGeneration
         except ImportError:
@@ -81,7 +82,7 @@ class TransformersModelV2:
             print("Loading model without BNB config")
         
         desired_dtype = model_config.torch_dtype if model_config.torch_dtype is not None else "auto"
-        base_model_path = model_config.base_model_source.resolve_base_model_path()
+        base_model_path = schema.resolve_base_model_path(model_config.base_model_source, paths_config)
         if model_config.use_flash_attention:
             model = Qwen3VLForConditionalGeneration.from_pretrained(
                 base_model_path,

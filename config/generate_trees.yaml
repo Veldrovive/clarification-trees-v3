@@ -44,3 +44,7 @@ paths:
 runtime_meta:
   git_commit: null
   git_strict: true
+
+wandb:
+  project: "clarification-trees-generation"
+  name: null

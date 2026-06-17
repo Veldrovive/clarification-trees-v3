@@ -24,8 +24,9 @@ class RemoteVLLMModel:
 
     def __init__(
         self,
-        model_cfg: schema.ClarificationModelType | schema.AnswerModelType, loras_path: Path,
-        merged_models_path: Path | None = None,
+        model_cfg: schema.ClarificationModelType | schema.AnswerModelType,
+        paths_config: schema.PathsConfig,
+        loras_path: Path,
         gpus: list[int] = [0],
         max_model_len: int = 4096 * 2,
         gpu_memory_utilization: float = 0.9,
@@ -44,10 +45,7 @@ class RemoteVLLMModel:
 
         self.model_cfg = model_cfg
 
-        if merged_models_path is not None:
-            self.base_model_path = model_cfg.base_model_source.resolve_base_model_path(merged_models_path)
-        else:
-            self.base_model_path = model_cfg.base_model_source.resolve_base_model_path()
+        self.base_model_path = schema.resolve_base_model_path(model_cfg.base_model_source, paths_config)
         self.lora_config = model_cfg.lora_config
         self.use_lora = self.lora_config.use_lora if self.lora_config else False
         self.lora_id = self.lora_config.lora_id if self.lora_config else None
@@ -298,6 +296,7 @@ async def run_test():
     
     remote_model = RemoteVLLMModel(
         config.clarification_model,
+        config.paths,
         lora_checkpoint_path,
         environment_path=Path("/scratch4/home/adempst/projects/clarification-trees-v2/venv_vllm"),
         gpus=[6, 7],
