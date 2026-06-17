@@ -7,42 +7,31 @@ from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 import peft
 
-from clarification_trees_v3.config.schema import Config, parse_config
+from clarification_trees_v3.config.cold_start_schema import ColdStartConfig, parse_cold_start_config
 from clarification_trees_v3.models.transformers_model_v2 import TransformersModelV2
 from clarification_trees_v3.definitions import BASE_WEIGHTS_PATH
 
 from logging import getLogger
 logger = getLogger(Path(__file__).name)
 
-@hydra.main(config_path="../../config", config_name="config", version_base=None)
+@hydra.main(config_path="../../config", config_name="cold_start_config", version_base=None)
 def main(cfg: DictConfig):
     # Parse existing config
-    parsed_cfg: Config = parse_config(cfg)
+    # hi <3
+    parsed_cfg: ColdStartConfig = parse_cold_start_config(cfg)
     model_config = parsed_cfg.clarification_model
-    
-    # Get custom CLI arguments if provided (using OmegaConf.select for custom hydra kwargs)
-    adapter_path_str = OmegaConf.select(cfg, "adapter_path", default=None)
-    output_dir_str = OmegaConf.select(cfg, "output_dir", default=None)
 
-    lora_id = model_config.lora_config.lora_id if model_config.lora_config else None
-    
-    # Resolve adapter path
-    if adapter_path_str is not None:
-        adapter_path = Path(adapter_path_str)
-    else:
-        assert lora_id is not None, "lora_id must be specified in the config, or +adapter_path must be provided."
-        lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(parsed_cfg.paths.checkpoints.loras_subpath) / lora_id
-        adapter_path = lora_checkpoint_path / "best_adapter"
+    lora_id = model_config.lora_config.lora_id
+    assert lora_id is not None
+    assert BASE_WEIGHTS_PATH
+    loras_base_path = BASE_WEIGHTS_PATH / parsed_cfg.paths.checkpoints.loras_subpath
+    merged_models_base_path = BASE_WEIGHTS_PATH / parsed_cfg.paths.checkpoints.merged_models_subpath
 
-    if not adapter_path.exists():
-        raise FileNotFoundError(f"Adapter not found at {adapter_path}. Please ensure the model was trained and saved.")
-
-    # Resolve output directory
-    if output_dir_str is not None:
-        output_dir = Path(output_dir_str)
-    else:
-        assert lora_id is not None, "lora_id must be specified in the config, or +output_dir must be provided."
-        output_dir = BASE_WEIGHTS_PATH / "merged_models" / lora_id
+    adapter_path = loras_base_path / lora_id / "best_adapter"
+    assert adapter_path.exists(), f"Cannot find adapter to merge at {adapter_path}"
+    merged_model_path = merged_models_base_path / lora_id
+    assert not merged_model_path.exists(), f"Merged model already exists at {merged_model_path}"
+    output_dir = merged_model_path
 
     # 1. Bypass BNB Config (disable quantization)
     if model_config.bnb_config is not None:
@@ -55,7 +44,7 @@ def main(cfg: DictConfig):
         model_config.torch_dtype = "bfloat16"
         
     # 3. Determine device (Default to CPU for large model merging to prevent OOM)
-    device = OmegaConf.select(cfg, "device", default="cpu")
+    device = "cpu"
 
     logger.info(f"Loading base model ({model_config.model_name}) in {model_config.torch_dtype} on {device}...")
     model = TransformersModelV2(model_config, device)

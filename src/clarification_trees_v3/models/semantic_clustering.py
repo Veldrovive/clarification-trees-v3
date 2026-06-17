@@ -254,6 +254,8 @@ class BidirectionalEntailmentClusterer(Clusterer):
             self.device_str = f"cuda:{self.device[0]}"
         elif str(self.device).isnumeric():
             self.device_str = f"cuda:{self.device}"
+        elif isinstance(self.device, str):
+            self.device_str = self.device
         else:
             raise ValueError(f"Invalid device: {self.device} ({type(self.device)})")
         print(f"Using device: {self.device_str}")

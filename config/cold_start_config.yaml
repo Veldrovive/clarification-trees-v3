@@ -1,0 +1,17 @@
+seed: 42
+
+defaults:
+  - _self_       # 2. Let the rest of this YAML file override the schema defaults
+  - clarification_model/base: qwen_3_vl_32b_lora_bfloat16
+  - clarification_model/lora: qwen_3_vl_32b_lora_bfloat16
+
+paths:
+  data:
+    trees_subpath: v2
+  checkpoints:
+    loras_subpath: v2/loras
+    merged_models_subpath: v2/merged_models
+
+runtime_meta:
+  git_commit: null
+  git_strict: true

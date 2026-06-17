@@ -12,6 +12,7 @@ import time
 import httpx
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
+import clarification_trees_v3.config.schema as schema
 
 class RemoteVLLMModel:
     process: subprocess.Popen | None
@@ -23,12 +24,13 @@ class RemoteVLLMModel:
 
     def __init__(
         self,
-        model_cfg: DictConfig, loras_path: Path,
+        model_cfg: schema.ClarificationModelType | schema.AnswerModelType, loras_path: Path,
+        merged_models_path: Path | None = None,
         gpus: list[int] = [0],
         max_model_len: int = 4096 * 2,
         gpu_memory_utilization: float = 0.9,
         port: int = 29002,
-        startup_timeout: int = 60*5,
+        startup_timeout: int = 60*50,
         max_lora_rank: int = 64,
         log_file: Path | None = None,
         environment_path: Path | None = None,
@@ -42,13 +44,16 @@ class RemoteVLLMModel:
 
         self.model_cfg = model_cfg
 
-        self.base_model_hf_transformers_key = model_cfg.model_hf_transformers_key
+        if merged_models_path is not None:
+            self.base_model_path = model_cfg.base_model_source.resolve_base_model_path(merged_models_path)
+        else:
+            self.base_model_path = model_cfg.base_model_source.resolve_base_model_path()
         self.lora_config = model_cfg.lora_config
-        self.use_lora = self.lora_config.use_lora
-        self.lora_id = self.lora_config.lora_id
+        self.use_lora = self.lora_config.use_lora if self.lora_config else False
+        self.lora_id = self.lora_config.lora_id if self.lora_config else None
 
-        if "sampling_params" in model_cfg:
-            self.sampling_params = model_cfg['sampling_params']
+        if hasattr(model_cfg, "sampling_params") and getattr(model_cfg, "sampling_params") is not None:
+            self.sampling_params = model_cfg.sampling_params
         else:
             self.sampling_params = {
                 "temperature": 1.0,
@@ -146,7 +151,7 @@ class RemoteVLLMModel:
         if self.is_running:
             self.allowed_model_keys = await self._get_loaded_model_ids()
             print(f"Found existing vLLM server on port {self.port} with models {self.allowed_model_keys}")
-            assert self.base_model_hf_transformers_key in self.allowed_model_keys, f"Base model {self.base_model_hf_transformers_key} not found in vLLM server on port {self.port}"
+            assert self.base_model_path in self.allowed_model_keys, f"Base model {self.base_model_path} not found in vLLM server on port {self.port}"
             if self.use_lora:
                 assert self.lora_id in self.allowed_model_keys, f"LoRA adapter {self.lora_id} not found in vLLM server on port {self.port}"
             return
@@ -165,8 +170,8 @@ class RemoteVLLMModel:
             env["NCCL_DEBUG"] = "TRACE"
 
         command = [
-            # python_executable, "-m", "vllm.entrypoints.openai_api_server", self.base_model_hf_transformers_key,
-            "vllm", "serve", self.base_model_hf_transformers_key,
+            # python_executable, "-m", "vllm.entrypoints.openai_api_server", self.base_model_path,
+            "uv", "run", "vllm", "serve", self.base_model_path,
             "--host", "0.0.0.0",
             "--port", str(self.port),
             "--trust-remote-code",
@@ -206,7 +211,7 @@ class RemoteVLLMModel:
             await self.load_lora_adapter(self.lora_id)
 
         self.allowed_model_keys = await self._get_loaded_model_ids()
-        assert self.base_model_hf_transformers_key in self.allowed_model_keys, f"Base model {self.base_model_hf_transformers_key} not found in vLLM server on port {self.port}"
+        assert self.base_model_path in self.allowed_model_keys, f"Base model {self.base_model_path} not found in vLLM server on port {self.port}"
         if self.use_lora:
             assert self.lora_id in self.allowed_model_keys, f"LoRA adapter {self.lora_id} not found in vLLM server on port {self.port}"
 
@@ -246,7 +251,7 @@ class RemoteVLLMModel:
         elif use_lora:
             chosen_key = self.lora_id
         else:
-            chosen_key = self.base_model_hf_transformers_key
+            chosen_key = self.base_model_path
 
         if chosen_key not in self.allowed_model_keys:
             # Might be that it was added externally. Refresh the list and check again

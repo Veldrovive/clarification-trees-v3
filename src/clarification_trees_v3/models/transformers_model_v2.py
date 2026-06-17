@@ -81,9 +81,10 @@ class TransformersModelV2:
             print("Loading model without BNB config")
         
         desired_dtype = model_config.torch_dtype if model_config.torch_dtype is not None else "auto"
+        base_model_path = model_config.base_model_source.resolve_base_model_path()
         if model_config.use_flash_attention:
             model = Qwen3VLForConditionalGeneration.from_pretrained(
-                model_config.model_hf_transformers_key,
+                base_model_path,
                 dtype=desired_dtype,
                 attn_implementation="flash_attention_2",
                 device_map=self.device,
@@ -91,12 +92,12 @@ class TransformersModelV2:
             )
         else:
             model = Qwen3VLForConditionalGeneration.from_pretrained(
-                model_config.model_hf_transformers_key,
+                base_model_path,
                 dtype=desired_dtype,
                 device_map=self.device,
                 quantization_config=bnb_config
             )
-        processor = AutoProcessor.from_pretrained(model_config.model_hf_transformers_key)
+        processor = AutoProcessor.from_pretrained(base_model_path)
 
         # assert isinstance(processor, transformers.PreTrainedTokenizer), f"Processor is not a PreTrainedTokenizer: {type(processor)}"
 

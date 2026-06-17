@@ -14,39 +14,51 @@ import gc
 from omegaconf import DictConfig, OmegaConf
 
 from clarification_trees_v3.config import schema
-from clarification_trees_v3.config.cold_start_schema import ColdStartConfig, parse_cold_start_config
+from clarification_trees_v3.config.sft_tree_schema import SFTTreeConfig, parse_sft_tree_config, get_base_config
 from clarification_trees_v3.models.transformers_model_v2 import TransformersModelV2
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory, DialogNode
 from clarification_trees_v3.utils import set_seed
-from clarification_trees_v3.dataset.dataset import ClearVQADataset, ClearVQASample
+from clarification_trees_v3.dataset.dataset import ClearVQADataset, ClearVQASample, SFTClarificationTreeDataset, SFTClarificationTreeSample
 
-from clarification_trees_v3.definitions import BASE_WEIGHTS_PATH
+from clarification_trees_v3.definitions import BASE_WEIGHTS_PATH, GENERATED_TREES_PATH
 
 from logging import getLogger
 logger = getLogger(Path(__file__).name)
 
 def get_collate_fn(model: TransformersModelV2):
-    def clarification_sample_collate(batch: list[ClearVQASample]):
+    def clarification_sample_collate(batch: list[ClearVQASample | SFTClarificationTreeSample]):
         processed_samples = []
         
         for sample in batch:
-            image = sample.image
-            assert image is not None, "ClearVQADataset was created without image loading enabled."
-            ambiguous_question = sample.blurred_question
-            clarifying_question = sample.clarification_question
-            image_path = sample.image_path
-            
-            # Construct tree to get the trajectory
-            tree = DialogTree(ambiguous_question, image, image_path)
-            # Add the target node (Assistant's response)
-            cq = tree.add_node(DialogTree.ROOT, NodeType.CLARIFICATION_QUESTION, clarifying_question)
-            
-            # Get trajectory specifically ending at the target
-            trajectory = tree.get_trajectory(cq)
+            if isinstance(sample, ClearVQASample):
+                image = sample.image
+                assert image is not None, "ClearVQADataset was created without image loading enabled."
+                ambiguous_question = sample.blurred_question
+                clarifying_question = sample.clarification_question
+                image_path = sample.image_path
+                
+                # Construct tree to get the trajectory
+                tree = DialogTree(ambiguous_question, image, image_path)
+                # Add the target node (Assistant's response)
+                cq = tree.add_node(DialogTree.ROOT, NodeType.CLARIFICATION_QUESTION, clarifying_question)
+                
+                # Get trajectory specifically ending at the target
+                trajectory = tree.get_trajectory(cq)
 
-            # Process to tokens in such a way that all labels are masked except the clarifying question
-            tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
-            processed_samples.append(tokenized)
+                # Process to tokens in such a way that all labels are masked except the clarifying question
+                tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
+                processed_samples.append(tokenized)
+            elif isinstance(sample, SFTClarificationTreeSample):
+                trajectory = DialogTrajectory()
+                trajectory.trajectory = list(sample.trajectory.trajectory)
+                
+                target_node = DialogNode(NodeType.CLARIFICATION_QUESTION, None, None, sample.target)
+                trajectory.trajectory.append(target_node)
+                
+                tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
+                processed_samples.append(tokenized)
+            else:
+                raise ValueError(f"Unknown sample type: {type(sample)}")
     
         input_ids = [s["input_ids"] for s in processed_samples]
         labels = [s["labels"] for s in processed_samples]
@@ -180,14 +192,11 @@ def save_checkpoint(
     epoch: int,
     is_best: bool = False
 ):
-    # For each checkpoint, we save a folder containing the full state of training
     checkpoint_dir = save_dir / f"epoch_{epoch:03d}"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save the model
     model.save_adapter(checkpoint_dir / "adapter", adapter_name="default")
 
-    # Save the optimizer and metadata
     torch.save({
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
@@ -199,7 +208,7 @@ def save_checkpoint(
     if is_best:
         model.save_adapter(save_dir / "best_adapter", adapter_name="default")
 
-def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader: DataLoader, cfg: ColdStartConfig):
+def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader: DataLoader, cfg: SFTTreeConfig):
     model_config = cfg.clarification_model
     lora_config = model_config.lora_config
 
@@ -230,12 +239,10 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
     save_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving LoRA checkpoints to {save_dir}")
     
-    # To create the optimizer, we need to get the parameters that are trainable (the LORA ones)
     assert model.peft_model is not None, "No adapter is currently loaded or constructed."
     trainable_params = [p for p in model.peft_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
 
-    # For good practice we also use an LR scheduler
     num_training_steps = len(train_loader) * epochs
     num_warmup_steps = int(num_training_steps * warmup_ratio)
     scheduler = get_linear_schedule_with_warmup(
@@ -281,7 +288,6 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
             epoch_loss += loss.item() * gradient_accumulation_steps
 
             if (step + 1) % gradient_accumulation_steps == 0:
-                # Clip gradients for stability
                 torch.nn.utils.clip_grad_norm_(trainable_params, max_grad_norm)
                 
                 optimizer.step()
@@ -290,7 +296,6 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
                 
                 global_step += 1
                 
-                # Logging
                 current_lr = scheduler.get_last_lr()[0]
                 wandb.log({
                     "train/loss": loss.item() * gradient_accumulation_steps,
@@ -335,25 +340,35 @@ def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModel
 
     return model
 
-@hydra.main(config_path="../../config", config_name="cold_start_config", version_base=None)
-def main(cfg: DictConfig):
-    cfg: ColdStartConfig = parse_cold_start_config(cfg)
+@hydra.main(config_path="../../config", config_name="sft_tree_config", version_base=None)
+def main(raw_cfg: DictConfig):
+    cfg: SFTTreeConfig = parse_sft_tree_config(raw_cfg)
+    base_cfg: schema.Config = get_base_config(cfg)
     print(f"Training with config:\n{cfg.model_dump_json(indent=2)}")
 
     model_config = cfg.clarification_model
     training_config = model_config.lora_config.training_config
     lora_id = model_config.lora_config.lora_id
 
-    logger.info("Starting training for clarification LORA")
+    logger.info("Starting SFT training for clarification LORA using Tree Dataset")
     logger.info(f"Model config: {model_config}")
 
     model = construct_model_with_lora(model_config)
     collate_fn = get_collate_fn(model)
 
-    train_ds = ClearVQADataset(table_name="train_annotated.jsonl")
+    assert GENERATED_TREES_PATH is not None, "GENERATED_TREES_PATH is required to load tree dataset"
+    trees_path = GENERATED_TREES_PATH / cfg.paths.data.trees_subpath
+    
+    train_ds = SFTClarificationTreeDataset(
+        cfg=base_cfg,
+        trees_path=trees_path,
+        load_images=cfg.sft_dataset.load_images,
+        advantage_threshold=cfg.sft_dataset.advantage_threshold,
+        top_n=cfg.sft_dataset.top_n
+    )
     val_ds = ClearVQADataset(table_name="val_annotated.jsonl")
 
-    # Aritifially limit the dataset to a small subset of samples
+    # Aritifially limit the dataset to a small subset of samples for quick tests
     from torch.utils.data import Subset
     # train_ds = Subset(train_ds, range(100))
     val_ds = Subset(val_ds, range(1000))
@@ -376,7 +391,7 @@ def main(cfg: DictConfig):
     )
 
     wandb.init(
-        project="clarification-cold-start",
+        project="clarification-sft-tree",
         config=cfg.model_dump(),
         name=lora_id
     )

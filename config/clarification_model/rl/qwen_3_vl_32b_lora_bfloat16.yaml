@@ -1,0 +1,18 @@
+# @package clarification_model
+rl_config:
+  training_config:
+    epochs: 2
+    evaluate_first: true
+    seed: 42
+    device: cuda:0
+    batch_size: 1
+    lr: 1e-4
+    weight_decay: 0.0
+    gradient_accumulation_steps: 1
+    max_grad_norm: 1.0
+    warmup_ratio: 0.0
+    clip_eps: 0.2
+    beta: 0.01
+    n_generation_samples: 10
+    max_train_steps: 200
+    max_val_steps: 40

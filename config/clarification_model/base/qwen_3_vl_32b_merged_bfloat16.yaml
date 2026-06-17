@@ -1,0 +1,17 @@
+# @package clarification_model
+model_type: huggingface
+model_name: qwen-3-vl-32b
+base_model_source:
+  source_type: local_merged
+  merged_lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
+base_prompt: You are an agent designed to ask clarifying questions to better understand
+  a user's query.
+use_flash_attention: false
+max_new_tokens: 128
+image_resize_config:
+  width: 512
+  height: 512
+  pad_color:
+  - 0
+  - 0
+  - 0

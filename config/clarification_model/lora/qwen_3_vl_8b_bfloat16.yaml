@@ -1,0 +1,33 @@
+# @package clarification_model
+lora_config:
+  use_lora: true
+  lora_id: qwen_3_vl_8b_clarification_lora_v1
+  training_config:
+    epochs: 10
+    evaluate_first: true
+    seed: 42
+    device: cuda:5
+    batch_size: 4
+    lr: 1e-4
+    weight_decay: 0.01
+    gradient_accumulation_steps: 4
+    max_grad_norm: 1.0
+    warmup_ratio: 0.03
+    patience: 2
+  peft_config:
+    r: 8
+    lora_alpha: 16
+    lora_dropout: 0.05
+    target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16

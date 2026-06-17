@@ -2,6 +2,8 @@ from typing import Union, Literal, Annotated
 from pydantic import BaseModel, Field, model_validator
 from omegaconf import DictConfig, OmegaConf
 import hydra
+from pathlib import Path
+from clarification_trees_v3.definitions import BASE_WEIGHTS_PATH
 
 class DialogTreeConfig(BaseModel):
     max_depth: int = 3
@@ -32,6 +34,7 @@ class DataPathsConfig(BaseModel):
 
 class CheckpointsPathsConfig(BaseModel):
     loras_subpath: str
+    merged_models_subpath: str
 
 class PathsConfig(BaseModel):
     data: DataPathsConfig
@@ -107,21 +110,51 @@ class RLTrainingConfig(BaseModel):
 class RLConfig(BaseModel):
     training_config: RLTrainingConfig
 
+class BaseModelSourceConfig(BaseModel):
+    source_type: Literal["huggingface", "local_merged"] = "huggingface"
+    huggingface_key: str | None = None
+    merged_lora_id: str | None = None
+
+    @model_validator(mode="after")
+    def check_source_config(self) -> "BaseModelSourceConfig":
+        if self.source_type == "huggingface" and self.huggingface_key is None:
+            raise ValueError("huggingface_key is required when source_type is 'huggingface'")
+        if self.source_type == "local_merged" and self.merged_lora_id is None:
+            raise ValueError("merged_lora_id is required when source_type is 'local_merged'")
+        return self
+
+    def resolve_base_model_path(self, merged_models_path: Path | None = None) -> str:
+        if self.source_type == "huggingface":
+            assert self.huggingface_key is not None
+            return self.huggingface_key
+        elif self.source_type == "local_merged":
+            assert self.merged_lora_id is not None
+            if merged_models_path is not None:
+                path = merged_models_path / self.merged_lora_id
+            else:
+                assert BASE_WEIGHTS_PATH is not None, "BASE_WEIGHTS_PATH environment variable is required for local merged weights."
+                path = BASE_WEIGHTS_PATH / "merged_models" / self.merged_lora_id
+            if not path.exists():
+                print(f"Warning: Merged local model not found at {path}")
+            return str(path)
+        else:
+            raise ValueError(f"Unknown source type: {self.source_type}")
+
 # --- Clarification Models ---
 
 class BaseClarificationModelConfig(BaseModel):
     model_name: str
     base_prompt: str
 
-    lora_config: LoraConfig
-    rl_config: RLConfig
+    lora_config: LoraConfig | None = None
+    rl_config: RLConfig | None = None
     bnb_config: BnBConfig | None = None
     torch_dtype: str | None = None
     image_resize_config: ImageResizeConfig
 
 class HuggingfaceClarificationModelConfig(BaseClarificationModelConfig):
     model_type: Literal["huggingface"] = "huggingface"
-    model_hf_transformers_key: str
+    base_model_source: BaseModelSourceConfig
     use_flash_attention: bool = False
     max_new_tokens: int = 128
 
@@ -146,7 +179,7 @@ class BaseAnswerModelConfig(BaseModel):
 
 class HuggingfaceAnswerModelConfig(BaseAnswerModelConfig):
     model_type: Literal["huggingface"] = "huggingface"
-    model_hf_transformers_key: str
+    base_model_source: BaseModelSourceConfig
     use_flash_attention: bool = False
     max_new_tokens: int = 128
 

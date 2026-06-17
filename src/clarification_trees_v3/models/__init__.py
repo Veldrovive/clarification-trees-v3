@@ -30,11 +30,11 @@ def construct_semantic_clusterer(semantic_cluster_config: DictConfig, device: st
     """
     Construct a Clusterer from the given config.
     """
-    if semantic_cluster_config.model_type == "sentence_transformers":
+    if semantic_cluster_config.model_type == "sentence_transformers_clusterer":
         return SemanticClusterer(semantic_cluster_config, device)
-    elif semantic_cluster_config.model_type == "bidirectional_entailment":
+    elif semantic_cluster_config.model_type == "bidirectional_entailment_clusterer":
         return BidirectionalEntailmentClusterer(semantic_cluster_config, device)
-    elif semantic_cluster_config.model_type == "hybrid":
+    elif semantic_cluster_config.model_type == "hybrid_clusterer":
         return HybridClusterer(semantic_cluster_config, device)
     else:
         raise NotImplementedError(f"Model type {semantic_cluster_config.model_type} is not implemented for semantic clustering")

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from typing import TypedDict
 
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, TreeSidecar, DialogTrajectory
 import clarification_trees_v3.config.schema as schema
 
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH, CLEAR_VQA_BASE_PATH
@@ -235,6 +235,121 @@ class ClarificationTreeDataset(Dataset):
             advantages=child_advantages,
             token_values=child_token_values,
             token_logprobs=child_token_logprobs
+        )
+
+@dataclass
+class SFTClarificationTreeSample:
+    trajectory: DialogTrajectory
+    target: str
+    advantage: float
+
+class SFTClarificationTreeDataset(Dataset):
+    trees: list[DialogTree]
+    sidecars: list[TreeSidecar]
+    samples: list[dict]
+    
+    def __init__(self,
+        cfg: schema.Config | None,
+        trees_path: Path | None = GENERATED_TREES_PATH,
+        tree_paths: list[Path] | None = None,
+        load_images: bool = True,
+        advantage_threshold: float | None = None,
+        top_n: int | None = None,
+    ):
+        self.cfg = cfg
+        self.trees_path = trees_path
+        self.tree_paths = tree_paths
+        self.load_images = load_images
+        self.advantage_threshold = advantage_threshold
+        self.top_n = top_n
+
+        assert self.trees_path is None or self.tree_paths is None, "One of trees_path or tree_paths must be None"
+        assert self.trees_path is not None or self.tree_paths is not None, "One of trees_path or tree_paths must not be None"
+
+        self._load_trees()
+
+    def _load_trees(self):
+        trees = []
+        sidecars = []
+        samples = []
+        total_possible_samples = 0
+
+        if self.trees_path is not None:
+            tree_dirs = list(self.trees_path.iterdir())
+        elif self.tree_paths is not None:
+            tree_dirs = self.tree_paths
+        else:
+            raise ValueError(f"Both trees_path and tree_path")
+
+        for tree_dir in tqdm(tree_dirs, desc="Loading trees for SFT"):
+            if not tree_dir.is_dir():
+                print(f"Skipping non-directory {tree_dir}")
+                continue
+
+            tree_path = tree_dir / "tree.json"
+            if not tree_path.exists():
+                print(f"Skipping non-tree {tree_path}")
+                continue
+            
+            sidecar_path = tree_dir / "tree_sidecar.json"
+            if not sidecar_path.exists():
+                print(f"Skipping non-sidecar {sidecar_path}")
+                continue
+            
+            tree = DialogTree.load(tree_path, load_images=self.load_images)
+            sidecar = TreeSidecar.load(sidecar_path)
+            
+            tree_idx = len(trees)
+            trees.append(tree)
+            sidecars.append(sidecar)
+            
+            assert self.cfg is not None, "Config must be provided to compute rewards for filtering"
+            sidecar.compute_rewards(self.cfg)
+
+            for parent_node_idx, parent_node in tree.get_nodes():
+                child_cq_idxs = tree.get_children_idxs(parent_node_idx, type_filter=NodeType.CLARIFICATION_QUESTION)
+
+                if len(child_cq_idxs) == 0:
+                    continue
+
+                child_advantages = [(child_idx, sidecar.advantage_cache[child_idx]) for child_idx in child_cq_idxs]
+                total_possible_samples += len(child_advantages)
+                
+                if self.advantage_threshold is not None:
+                    child_advantages = [x for x in child_advantages if x[1] >= self.advantage_threshold]
+                    
+                for child_idx, advantage in child_advantages:
+                    samples.append({
+                        "tree_idx": tree_idx,
+                        "parent_node_idx": parent_node_idx,
+                        "target_node_idx": child_idx,
+                        "advantage": advantage
+                    })
+
+        if self.top_n is not None:
+            samples = sorted(samples, key=lambda x: x["advantage"], reverse=True)[:self.top_n]
+
+        self.trees = trees
+        self.sidecars = sidecars
+        self.samples = samples
+
+        pct_used = (len(self.samples) / total_possible_samples * 100) if total_possible_samples > 0 else 0.0
+        print(f"Found {len(self.trees)} trees. Total unfiltered samples: {total_possible_samples}. Using {len(self.samples)} SFT samples ({pct_used:.1f}%).")
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, index: int) -> SFTClarificationTreeSample:
+        sample = self.samples[index]
+        tree = self.trees[sample["tree_idx"]]
+        
+        trajectory = tree.get_trajectory(sample["parent_node_idx"])
+        target = tree.get_node(sample["target_node_idx"]).response
+        
+        return SFTClarificationTreeSample(
+            trajectory=trajectory,
+            target=target,
+            advantage=sample["advantage"]
         )
 
 
