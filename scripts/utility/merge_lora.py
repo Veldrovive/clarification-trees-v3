@@ -27,9 +27,10 @@ def main(cfg: DictConfig):
     loras_base_path = BASE_WEIGHTS_PATH / parsed_cfg.paths.checkpoints.loras_subpath
     merged_models_base_path = BASE_WEIGHTS_PATH / parsed_cfg.paths.checkpoints.merged_models_subpath
 
-    adapter_path = loras_base_path / lora_id / "best_adapter"
+    lora_dir_name = lora_id + model_config.lora_config.lora_id_postfix
+    adapter_path = loras_base_path / lora_dir_name / model_config.lora_config.adapter_subpath
     assert adapter_path.exists(), f"Cannot find adapter to merge at {adapter_path}"
-    merged_model_path = merged_models_base_path / lora_id
+    merged_model_path = merged_models_base_path / lora_dir_name
     assert not merged_model_path.exists(), f"Merged model already exists at {merged_model_path}"
     output_dir = merged_model_path
 

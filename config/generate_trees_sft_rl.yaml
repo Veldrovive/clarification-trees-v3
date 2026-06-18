@@ -1,0 +1,8 @@
+defaults:
+  - generate_trees
+  - clarification_model/lora: qwen_3_vl_32b_lora_bfloat16
+  - _self_
+
+clarification_model:
+  lora_config:
+    lora_id_postfix: "_rl_sft_iter_0"

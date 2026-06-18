@@ -73,7 +73,8 @@ class ClearVQADataset(Dataset):
         if self.load_images:
             if image_path.exists():
                 try:
-                    img = Image.open(image_path).convert('RGB')
+                    with Image.open(image_path) as f:
+                        img = f.convert('RGB')
                     if self.transform:
                         img = self.transform(img)
                     sample['image'] = img
@@ -249,12 +250,14 @@ class SFTClarificationTreeDataset(Dataset):
         tree_paths: list[Path] | None = None,
         load_images: bool = True,
         advantage_threshold: float | None = None,
+        min_reward_threshold: float | None = None,
         top_n: int | None = None,
     ):
         self.trees_path = trees_path
         self.tree_paths = tree_paths
         self.load_images = load_images
         self.advantage_threshold = advantage_threshold
+        self.min_reward_threshold = min_reward_threshold
         self.top_n = top_n
 
         assert self.trees_path is None or self.tree_paths is None, "One of trees_path or tree_paths must be None"
@@ -308,6 +311,9 @@ class SFTClarificationTreeDataset(Dataset):
                 child_advantages = [(child_idx, sidecar.advantage_cache[child_idx]) for child_idx in child_cq_idxs]
                 total_possible_samples += len(child_advantages)
                 
+                if self.min_reward_threshold is not None:
+                    child_advantages = [x for x in child_advantages if sidecar.reward_cache[x[0]] >= self.min_reward_threshold]
+
                 if self.advantage_threshold is not None:
                     child_advantages = [x for x in child_advantages if x[1] >= self.advantage_threshold]
                     

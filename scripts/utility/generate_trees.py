@@ -33,7 +33,7 @@ async def use_models(cfg: Config, raw_cfg: DictConfig):
     if BASE_WEIGHTS_PATH is None:
         raise ValueError("BASE_WEIGHTS_PATH environment variable is required")
     
-    lora_checkpoint_path = BASE_WEIGHTS_PATH / "loras" / cfg.paths.checkpoints.loras_subpath
+    lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(cfg.paths.checkpoints.loras_subpath)
     merged_models_path = BASE_WEIGHTS_PATH / cfg.paths.checkpoints.merged_models_subpath
     
     clarification_model_cfg = cfg.clarification_model

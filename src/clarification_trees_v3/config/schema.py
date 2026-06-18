@@ -62,6 +62,8 @@ class PeftConfig(BaseModel):
 class LoraConfig(BaseModel):
     use_lora: bool = True
     lora_id: str | None = None
+    lora_id_postfix: str = ""
+    adapter_subpath: str = "best_adapter"
     training_config: LoraTrainingConfig | None = None
     peft_config: PeftConfig | None = None
 

@@ -11,6 +11,8 @@ from pathlib import Path
 from tqdm import tqdm
 import wandb
 import gc
+import random
+import itertools
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -54,7 +56,7 @@ def get_collate_fn(model: TransformersModelV2):
                 trajectory.trajectory = list(sample.trajectory.trajectory)
                 
                 target_node = DialogNode(NodeType.CLARIFICATION_QUESTION, None, None, sample.target)
-                trajectory.trajectory.append(target_node)
+                trajectory.trajectory.insert(0, target_node)
                 
                 tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
                 processed_samples.append(tokenized)
@@ -92,7 +94,7 @@ def get_collate_fn(model: TransformersModelV2):
 
     return clarification_sample_collate
 
-def evaluate(model: TransformersModelV2, val_loader: DataLoader, device: str, step_id: int):
+def evaluate(model: TransformersModelV2, val_loader: DataLoader, device: str, step_id: int, eval_batches: int | None = None):
     assert model.peft_model is not None, "No adapter is currently loaded or constructed."
     model.peft_model.eval()
 
@@ -103,9 +105,14 @@ def evaluate(model: TransformersModelV2, val_loader: DataLoader, device: str, st
     total_loss = 0.0
     num_batches = 0
 
+    total_batches = len(val_loader)
+    if eval_batches is not None and eval_batches < total_batches:
+        total_batches = eval_batches
+
     with torch.no_grad():
-        progress = tqdm(val_loader, desc="Validation Loss")
-        for batch in progress:
+        progress = tqdm(itertools.islice(val_loader, total_batches), desc="Validation Loss", total=total_batches)
+        for step, batch in enumerate(progress):
+            
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -145,28 +152,43 @@ def generate_samples(model: TransformersModelV2, val_loader: DataLoader, device:
     logger.info(f"Generating {n_samples} samples for step {step_id}")
 
     table_data = []
-    columns = ["Image Index", "Image", "Question Id", "Ambiguous Question", "Ground Truth CQ", "Model Prediction", "Answer"]
+    columns = ["Image Index", "Image", "Question Id", "Trajectory", "Ground Truth CQ", "Model Prediction", "Answer"]
 
     with torch.no_grad():
         dataset = val_loader.dataset
         # Handle Subset specifically if we need to access attributes
         vqa_dataset = dataset.dataset if hasattr(dataset, 'dataset') else dataset
-        assert isinstance(vqa_dataset, ClearVQADataset), "Dataset is not a ClearVQADataset"
+        assert isinstance(vqa_dataset, SFTClarificationTreeDataset), "Dataset is not a SFTClarificationTreeDataset"
         
-        progress = tqdm(range(min(n_samples, len(dataset))), desc="Generating Samples")
+        indices = list(range(len(dataset)))
+        # Use a deterministic random instance so we visualize the exact same validation samples every time
+        rng = random.Random(42)
+        rng.shuffle(indices)
+        indices = indices[:min(n_samples, len(dataset))]
+
+        progress = tqdm(indices, desc="Generating Samples")
         for i in progress:
             sample = dataset[i]
-            image = sample.image
-            assert image is not None, "ClearVQADataset was created without image loading enabled."
-            ambiguous_q = sample.blurred_question
-            gt_clarification = sample.clarification_question
-            question_id = sample.question_id
-            answer = sample.gold_answer
+            
+            orig_i = dataset.indices[i] if hasattr(dataset, 'indices') else i
+            sample_info = vqa_dataset.samples[orig_i]
+            tree_idx = sample_info["tree_idx"]
+            tree = vqa_dataset.trees[tree_idx]
 
-            tree = DialogTree(ambiguous_q, image, sample.image_path)
-            trajectory = tree.get_trajectory(DialogTree.ROOT)
+            image = tree.init_image
+            assert image is not None, "SFTClarificationTreeDataset was created without image loading enabled."
+            
+            trajectory_text_parts = []
+            for node in sample.trajectory.trajectory[::-1]:
+                role = node.node_type_to_str[node.node_type].capitalize()
+                trajectory_text_parts.append(f"**{role}:** {node.response}")
+            trajectory_text = "\n".join(trajectory_text_parts)
 
-            inputs = model.preprocess_generation_inputs(trajectory, role="user")
+            gt_clarification = sample.target
+            question_id = str(tree_idx)
+            answer = str(tree.gold_answer) if tree.gold_answer else "N/A"
+
+            inputs = model.preprocess_generation_inputs(sample.trajectory, role="user")
             prediction = model.generate(inputs)
             prediction_text = prediction[0] if isinstance(prediction, list) else prediction
             
@@ -174,7 +196,7 @@ def generate_samples(model: TransformersModelV2, val_loader: DataLoader, device:
                 i,
                 wandb.Image(image),
                 question_id,
-                ambiguous_q,
+                trajectory_text,
                 gt_clarification,
                 prediction_text,
                 answer
@@ -217,7 +239,6 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
     assert training_config is not None, "Training config not found."
 
     # Training config
-    set_seed(training_config.seed)
     epochs = training_config.epochs
     evaluate_first = training_config.evaluate_first
     device = training_config.device
@@ -245,29 +266,38 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
     trainable_params = [p for p in model.peft_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr, weight_decay=weight_decay)
 
-    num_training_steps = len(train_loader) * epochs
+    batches_per_epoch = cfg.sft_dataset.batches_per_epoch
+    num_batches_in_loader = len(train_loader)
+    
+    if batches_per_epoch is not None and batches_per_epoch < num_batches_in_loader:
+        steps_per_epoch = batches_per_epoch
+    else:
+        steps_per_epoch = num_batches_in_loader
+
+    num_training_steps = steps_per_epoch * epochs
     num_warmup_steps = int(num_training_steps * warmup_ratio)
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
     )
 
-    logger.info(f"Starting training: {epochs} epochs, {len(train_loader)} batches/epoch")
+    logger.info(f"Starting training: {epochs} epochs, {steps_per_epoch} batches/epoch")
     global_step = 0
     
     best_val_loss = float("inf")
     best_val_loss_epoch = -1
     if evaluate_first:
         logger.info("Evaluating before training...")
-        best_val_loss = evaluate(model, val_loader, device, global_step)
+        best_val_loss = evaluate(model, val_loader, device, global_step, cfg.sft_dataset.eval_batches_per_epoch)
         generate_samples(model, val_loader, device, global_step)
 
     for epoch in range(epochs):
         model.peft_model.train()
-        progress_bar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}")
+        progress_bar = tqdm(itertools.islice(train_loader, steps_per_epoch), desc=f"Training Epoch {epoch+1}", total=steps_per_epoch)
 
         epoch_loss = 0.0
 
         for step, batch in enumerate(progress_bar):
+            
             input_ids = batch["input_ids"].to(device)
             labels = batch["labels"].to(device)
             attention_mask = batch["attention_mask"].to(device)
@@ -303,12 +333,12 @@ def train_loop(model: TransformersModelV2, train_loader: DataLoader, val_loader:
                     "train/loss": loss.item() * gradient_accumulation_steps,
                     "train/lr": current_lr,
                     "train/step": global_step,
-                    "train/epoch": epoch + (step / len(train_loader))
+                    "train/epoch": epoch + (step / steps_per_epoch)
                 })
                 progress_bar.set_postfix({"loss": loss.item() * gradient_accumulation_steps})
     
         logger.info(f"End of Epoch {epoch+1}. Running validation...")
-        val_loss = evaluate(model, val_loader, device, global_step)
+        val_loss = evaluate(model, val_loader, device, global_step, cfg.sft_dataset.eval_batches_per_epoch)
         generate_samples(model, val_loader, device, global_step)
 
         if val_loss < best_val_loss:
@@ -367,6 +397,8 @@ def main(raw_cfg: DictConfig):
     training_config = model_config.lora_config.training_config
     lora_id = model_config.lora_config.lora_id
 
+    set_seed(training_config.seed)
+
     logger.info("Starting SFT training for clarification LORA using Tree Dataset")
     logger.info(f"Model config: {model_config}")
 
@@ -376,18 +408,32 @@ def main(raw_cfg: DictConfig):
     assert GENERATED_TREES_PATH is not None, "GENERATED_TREES_PATH is required to load tree dataset"
     trees_path = GENERATED_TREES_PATH / cfg.paths.data.trees_subpath
     
+    tree_dirs = [d for d in trees_path.iterdir() if d.is_dir()]
+    tree_dirs.sort()  # Sort to guarantee deterministic splits regardless of OS
+    random.shuffle(tree_dirs)
+    
+    val_split_size = int(len(tree_dirs) * cfg.sft_dataset.val_split)
+    val_tree_dirs = tree_dirs[:val_split_size]
+    train_tree_dirs = tree_dirs[val_split_size:]
+    
+    logger.info(f"Split {len(tree_dirs)} trees into {len(train_tree_dirs)} train and {len(val_tree_dirs)} val.")
+    
     train_ds = SFTClarificationTreeDataset(
-        trees_path=trees_path,
-        load_images=cfg.sft_dataset.load_images,
+        trees_path=None,
+        tree_paths=train_tree_dirs,
+        load_images=False,
         advantage_threshold=cfg.sft_dataset.advantage_threshold,
+        min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
         top_n=cfg.sft_dataset.top_n
     )
-    val_ds = ClearVQADataset(table_name="val_annotated.jsonl")
-
-    # Aritifially limit the dataset to a small subset of samples for quick tests
-    from torch.utils.data import Subset
-    # train_ds = Subset(train_ds, range(100))
-    val_ds = Subset(val_ds, range(1000))
+    val_ds = SFTClarificationTreeDataset(
+        trees_path=None,
+        tree_paths=val_tree_dirs,
+        load_images=True,
+        advantage_threshold=cfg.sft_dataset.advantage_threshold,
+        min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
+        top_n=None
+    )
 
     train_loader = DataLoader(
         train_ds, 

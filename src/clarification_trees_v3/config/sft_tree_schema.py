@@ -3,9 +3,12 @@ from .schema import *
 import typing
 
 class SFTTreeDatasetConfig(BaseModel):
-    load_images: bool = True
     advantage_threshold: float | None = None
+    min_reward_threshold: float | None = None
     top_n: int | None = None
+    batches_per_epoch: int | None = None
+    eval_batches_per_epoch: int | None = None
+    val_split: float = 0.1
 
 class SFTTreeConfig(BaseModel):
     seed: int

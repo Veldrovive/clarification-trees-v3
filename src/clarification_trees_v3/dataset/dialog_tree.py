@@ -68,12 +68,16 @@ class DialogNode:
                 img_content["image_url"] = {"url": f"file://{self.image_path}"}
                 img_content["uuid"] = self.image_path.name
             else:
-                assert self.image is not None, "If not using image paths, the image must be set"
-                img_content["image"] = self.image
+                image_to_use = self.image
+                if image_to_use is None and self.image_path is not None:
+                    image_to_use = Image.open(self.image_path).convert('RGB')
+                
+                assert image_to_use is not None, "If not using image paths, the image must be set or path must be valid"
+                img_content["image"] = image_to_use
                 if self.image_path is not None:
                     img_content["uuid"] = self.image_path.name
                 else:
-                    img_content["uuid"] = hashlib.md5(self.image.tobytes()).hexdigest()
+                    img_content["uuid"] = hashlib.md5(image_to_use.tobytes()).hexdigest()
             content.append(img_content)
         if self.response is not None and len(self.response) > 0:
             content.append({"type": "text", "text": self.response})
@@ -120,7 +124,9 @@ class DialogNode:
         image = None
         if image_path is not None and load_images:
             try:
-                image = Image.open(image_path)
+                # Use 'with' to ensure the file descriptor is closed and eagerly load/copy
+                with Image.open(image_path) as img:
+                    image = img.convert("RGB")
             except (FileNotFoundError, OSError):
                 print(f"Warning: Could not reload image at {image_path}")
                 image = None

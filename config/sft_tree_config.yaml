@@ -6,16 +6,32 @@ defaults:
   - clarification_model/lora: qwen_3_vl_32b_lora_bfloat16
 
 sft_dataset:
-  load_images: true
   advantage_threshold: 0.5
+  min_reward_threshold: 0.0
   top_n: null
+  batches_per_epoch: 400
+  eval_batches_per_epoch: 100
+
+# These overrides don't seem to be working?
+# clarification_model:
+#   lora_config:
+#     training_config:
+#       evaluate_first: false
+#       epochs: 10
+#       batch_size: 4
+#       lr: 1e-4
+#       weight_decay: 0.01
+#       gradient_accumulation_steps: 4
+#       max_grad_norm: 1.0
+#       warmup_ratio: 0.03
+#       patience: 2
 
 paths:
   data:
     trees_subpath: v2
   checkpoints:
-    loras_subpath: v2/tree_sft_loras
-    merged_models_subpath: v2/tree_sft_merged_models
+    loras_subpath: v2/loras
+    merged_models_subpath: v2/merged_models
 
 runtime_meta:
   git_commit: null

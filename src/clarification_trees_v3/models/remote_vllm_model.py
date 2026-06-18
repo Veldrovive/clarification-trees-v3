@@ -122,26 +122,30 @@ class RemoteVLLMModel:
 
     async def load_lora_adapter(self, lora_id: str, allow_overwrite: bool = False):
         current_models = await self._get_loaded_model_ids()
-        if lora_id in current_models:
+        
+        assert self.lora_config is not None
+        lora_dir_name = lora_id + self.lora_config.lora_id_postfix
+        
+        if lora_dir_name in current_models:
             if allow_overwrite:
                 # Then we first need to remove the model
-                await self.unload_lora_adapter(lora_id)
+                await self.unload_lora_adapter(lora_dir_name)
             else:
-                raise ValueError(f"LoRA adapter {lora_id} already loaded")
+                return # Already loaded
         
-        adapter_path = self.loras_path / lora_id / "best_adapter"
-        assert adapter_path.exists(), f"LoRA adapter {lora_id} not found at {adapter_path}"
+        adapter_path = self.loras_path / lora_dir_name / self.lora_config.adapter_subpath
+        assert adapter_path.exists(), f"LoRA adapter {lora_dir_name} not found at {adapter_path}"
 
         add_lora_url = f"{self._get_base_url()}/v1/load_lora_adapter"
         payload = {
-            "lora_name": lora_id,
+            "lora_name": lora_dir_name,
             "lora_path": str(adapter_path)
         }
         
         async with httpx.AsyncClient() as client:
             response = await client.post(add_lora_url, json=payload, timeout=60)
             if response.status_code != 200:
-                raise Exception(f"Failed to load LoRA adapter {lora_id}: {response.text}")
+                raise Exception(f"Failed to load LoRA adapter {lora_dir_name}: {response.text}")
             
             self.allowed_model_keys = await self._get_loaded_model_ids()
     
@@ -151,7 +155,11 @@ class RemoteVLLMModel:
             print(f"Found existing vLLM server on port {self.port} with models {self.allowed_model_keys}")
             assert self.base_model_path in self.allowed_model_keys, f"Base model {self.base_model_path} not found in vLLM server on port {self.port}"
             if self.use_lora:
-                assert self.lora_id in self.allowed_model_keys, f"LoRA adapter {self.lora_id} not found in vLLM server on port {self.port}"
+                lora_dir_name = self.lora_id + self.lora_config.lora_id_postfix
+                if lora_dir_name not in self.allowed_model_keys:
+                    print(f"LoRA adapter {lora_dir_name} not found in existing vLLM server. Loading it now.")
+                    await self.load_lora_adapter(self.lora_id)
+                assert lora_dir_name in self.allowed_model_keys, f"LoRA adapter {lora_dir_name} failed to load in vLLM server on port {self.port}"
             return
 
         python_executable = "python"
@@ -211,7 +219,8 @@ class RemoteVLLMModel:
         self.allowed_model_keys = await self._get_loaded_model_ids()
         assert self.base_model_path in self.allowed_model_keys, f"Base model {self.base_model_path} not found in vLLM server on port {self.port}"
         if self.use_lora:
-            assert self.lora_id in self.allowed_model_keys, f"LoRA adapter {self.lora_id} not found in vLLM server on port {self.port}"
+            lora_dir_name = self.lora_id + self.lora_config.lora_id_postfix
+            assert lora_dir_name in self.allowed_model_keys, f"LoRA adapter {lora_dir_name} not found in vLLM server on port {self.port}"
 
     def stop_server(self):
         if self.is_running_internally:
@@ -247,7 +256,7 @@ class RemoteVLLMModel:
         if model_key is not None:
             chosen_key = model_key
         elif use_lora:
-            chosen_key = self.lora_id
+            chosen_key = self.lora_id + self.lora_config.lora_id_postfix
         else:
             chosen_key = self.base_model_path
 
