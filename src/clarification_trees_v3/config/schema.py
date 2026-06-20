@@ -17,6 +17,7 @@ class DevicesConfig(BaseModel):
     clarification: list[int]
     answer: list[int]
     semantic_cluster: list[int]
+    sft: list[int] | None = None
 
 class RemoteVLLMConfig(BaseModel):
     port: int

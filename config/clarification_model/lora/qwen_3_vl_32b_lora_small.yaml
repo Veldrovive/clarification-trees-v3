@@ -26,8 +26,3 @@ lora_config:
     - gate_proj
     - up_proj
     - down_proj
-bnb_config:
-  load_in_4bit: true
-  bnb_4bit_quant_type: nf4
-  bnb_4bit_use_double_quant: true
-  bnb_4bit_compute_dtype: float32

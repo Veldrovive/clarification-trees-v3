@@ -5,4 +5,8 @@ defaults:
 
 clarification_model:
   lora_config:
-    lora_id_postfix: "_rl_sft_iter_0"
+    lora_id_postfix: "_rl_sft_iter_1"
+
+paths:
+  data:
+    trees_subpath: v2_rl_sft_iter_1

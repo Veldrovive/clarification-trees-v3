@@ -1,0 +1,94 @@
+seed: 42
+
+max_iters: 10
+trees_per_iteration: 750
+start_iter: 0
+
+dialog_tree:
+  max_depth: 3
+  question_expansion_factor: 3
+  answer_expansion_factor: 1
+  question_diverse_sample_count: 5
+  answer_diverse_sample_count: 5
+  inference_diverse_sample_count: 5
+
+devices:
+  clarification: [2]
+  answer: [1]
+  semantic_cluster: [3]
+  sft: [3]
+
+remote_vllm:
+  clarification:
+    port: 29002
+    gpu_memory_utilization: 0.90
+    max_lora_rank: 16
+    max_model_len: 4096
+    log_file: "clarification_vllm_remote.log"
+  answer:
+    port: 29003
+    gpu_memory_utilization: 0.90
+    max_lora_rank: 16
+    max_model_len: 4096
+    log_file: "answer_vllm_remote.log"
+
+defaults:
+  - _self_
+  - clarification_model/base: qwen_3_vl_32b_merged_bfloat16
+  - answer_model/base: qwen_3_vl_32b
+  - answer_model/lora: qwen_3_vl_32b
+  - semantic_cluster_model: bidirectional_entailment_clusterer
+
+# Override specific training configuration inside lora_config for SFT
+clarification_model:
+  lora_config:
+    use_lora: true
+    lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
+    lora_id_postfix: "_rl_sft_iter_0" # Dynamic, but starts at 0
+    training_config:
+      epochs: 2
+      evaluate_first: true
+      seed: 42
+      device: "cuda:0" # Fallback if devices.sft is not directly applied by code, but we'll use devices.sft programmatically
+      batch_size: 4
+      lr: 1e-4
+      weight_decay: 0.01
+      gradient_accumulation_steps: 4
+      max_grad_norm: 1.0
+      warmup_ratio: 0.03
+      patience: 100 # Disable early stopping effectively, but save_best will still work
+    peft_config:
+      r: 8
+      lora_alpha: 16
+      lora_dropout: 0.05
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+        - gate_proj
+        - up_proj
+        - down_proj
+
+sft_dataset:
+  advantage_threshold: 0.5
+  min_reward_threshold: 0.0
+  top_n: null
+  batches_per_epoch: 400
+  eval_batches_per_epoch: 100
+  val_split: 0.1
+
+paths:
+  data:
+    trees_subpath: v3_rl_sft
+  checkpoints:
+    loras_subpath: v3/loras
+    merged_models_subpath: v3/merged_models
+
+runtime_meta:
+  git_commit: null
+  git_strict: true
+
+wandb:
+  project: "iterative-sft-rl-tree"
+  name: null

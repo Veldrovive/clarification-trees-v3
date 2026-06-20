@@ -7,10 +7,10 @@ defaults:
 
 paths:
   data:
-    trees_subpath: v2
+    trees_subpath: v4
   checkpoints:
-    loras_subpath: v2/loras
-    merged_models_subpath: v2/merged_models
+    loras_subpath: v4/loras
+    merged_models_subpath: v4/merged_models
 
 runtime_meta:
   git_commit: null
