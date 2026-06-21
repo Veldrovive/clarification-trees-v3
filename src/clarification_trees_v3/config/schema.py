@@ -44,6 +44,7 @@ class PathsConfig(BaseModel):
 class LoraTrainingConfig(BaseModel):
     epochs: int = 10
     evaluate_first: bool = True
+    fallback_on_no_improvement: Literal["first_epoch", "previous_lora", "last_epoch"] = "previous_lora"
     seed: int = 42
     device: str = "cuda:7"
     batch_size: int = 1

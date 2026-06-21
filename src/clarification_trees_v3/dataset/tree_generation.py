@@ -94,9 +94,11 @@ async def expand_tree(
     cq_model: RemoteVLLMModel,
     answer_model: RemoteVLLMModel,
     sentence_analyzer: SentenceAnalyzer,
-    out_dir: Path
+    out_dir: Path,
+    seed: int | None = None
 ) -> tuple[Path, Path]:
     try:
+        local_random = random.Random(seed) if seed is not None else random
         dialog_tree_config = cfg.dialog_tree
         max_depth = dialog_tree_config.max_depth
         question_expansion_factor = dialog_tree_config.question_expansion_factor
@@ -118,7 +120,7 @@ async def expand_tree(
                     add_inference_messages(messages, model_cfg=cfg.answer_model)
 
                     with Timer("tree/generate_inference/generate", logger=None):
-                        request_output = await answer_model.generate(messages, n_outputs=n_outputs, use_lora=False)
+                        request_output = await answer_model.generate(messages, n_outputs=n_outputs, use_lora=False, seed=seed)
                     generated_texts = [o.message.content for o in request_output.choices if o.message.content is not None]
 
                     with Timer("tree/generate_inference/cluster", logger=None):
@@ -169,7 +171,7 @@ async def expand_tree(
 
                 with Timer(f"tree/{timer_key}", logger=None):
                     with Timer(f"tree/{timer_key}/generate", logger=None):
-                        request_output = await engine.generate(messages, n_outputs=sample_count, use_lora=use_lora, use_tokens_as_ids=True, logprobs=True)
+                        request_output = await engine.generate(messages, n_outputs=sample_count, use_lora=use_lora, use_tokens_as_ids=True, logprobs=True, seed=seed)
                         valid_choices = [choice for choice in request_output.choices if choice.message.content is not None]
                         generated_texts = [choice.message.content for choice in valid_choices]
                         generated_logprobs = [
@@ -187,7 +189,7 @@ async def expand_tree(
                 if not clusters:
                     continue
                 if len(clusters) > expansion_factor:
-                    cluster_indices = random.sample(range(len(clusters)), expansion_factor)
+                    cluster_indices = local_random.sample(range(len(clusters)), expansion_factor)
                     clusters = [clusters[i] for i in cluster_indices]
                     exemplars = [exemplars[i] for i in cluster_indices]
                     metadata_clusters = [metadata_clusters[i] for i in cluster_indices]
@@ -300,7 +302,8 @@ async def process_dataset_lazily(
                 cq_model=cq_model,
                 answer_model=answer_model,
                 sentence_analyzer=sentence_analyzer,
-                out_dir=out_dir_i
+                out_dir=out_dir_i,
+                seed=getattr(cfg, 'seed', 42) + i
             )
         )
         active_tasks.add(task)

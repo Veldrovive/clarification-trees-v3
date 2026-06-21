@@ -233,12 +233,15 @@ class RemoteVLLMModel:
         else:
             print(f"Stop called, but vLLM server on port {self.port} is external or not running")
 
-    async def generate(self, messages, n_outputs: int = 1, use_tokens_as_ids: bool = False, logprobs: int | bool | None = None, model_key: str | None = None, use_lora: bool | None = None) -> ChatCompletion:
+    async def generate(self, messages, n_outputs: int = 1, use_tokens_as_ids: bool = False, logprobs: int | bool | None = None, model_key: str | None = None, use_lora: bool | None = None, seed: int | None = None) -> ChatCompletion:
         sampling_params = {
             **self.sampling_params,
             "return_token_ids": True,
             "n": n_outputs
         }
+
+        if seed is not None:
+            sampling_params["seed"] = seed
 
         if use_tokens_as_ids:
             sampling_params["return_tokens_as_token_ids"] = True

@@ -17,6 +17,7 @@ from clarification_trees_v3.models.utils import use_models
 from clarification_trees_v3.models import construct_semantic_clusterer
 from clarification_trees_v3.dataset.tree_generation import process_dataset_lazily, print_timer_tree
 from clarification_trees_v3.training.sft_trainer import get_collate_fn, train_loop, construct_model_with_lora
+from clarification_trees_v3.training.eval_utils import gather_statistics, plot_metrics
 
 from logging import getLogger
 logger = getLogger(__name__)
@@ -55,6 +56,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
     sentence_analyzer = SentenceAnalyzer()
     ds = ClearVQADataset(load_images=False, table_name="train_annotated.jsonl")
+    val_ds = ClearVQADataset(load_images=False, table_name="val_annotated.jsonl")
 
     # PRE-STARTUP FIX: Configure the LoRA settings for vLLM startup
     if cfg.start_iter == 0:
@@ -102,33 +104,58 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             logger.info(f"Phase 1: Generating trees for iteration {iter_number}...")
             check_and_clean_malformed_trees(out_dir)
             existing_count = get_completed_trees_count(out_dir)
-            
             trees_to_generate = cfg.trees_per_iteration - existing_count
-            if trees_to_generate > 0:
-                logger.info(f"Need to generate {trees_to_generate} more trees to reach {cfg.trees_per_iteration}.")
-                
-                # Sample random indices from the dataset
-                # Note: We just sample random indices. In a perfect world, we'd exclude ones we already generated.
-                # Since the dataset is large, a random subset is fine.
-                indices = random.sample(range(len(ds)), trees_to_generate)
+            
+            eval_trees_subpath = f"{cfg.paths.data.trees_subpath}_eval_iter_{iter_number}"
+            eval_out_dir = GENERATED_TREES_PATH / eval_trees_subpath
+            eval_out_dir.mkdir(parents=True, exist_ok=True)
+            check_and_clean_malformed_trees(eval_out_dir)
+            eval_existing_count = get_completed_trees_count(eval_out_dir)
+            eval_trees_to_generate = getattr(cfg, 'eval_trees_per_iteration', 50) - eval_existing_count
 
+            if trees_to_generate > 0 or eval_trees_to_generate > 0:
                 logger.info("Loading semantic clusterer for tree generation...")
                 clusterer_gpus = cfg.devices.semantic_cluster
                 clusterer = construct_semantic_clusterer(raw_cfg.semantic_cluster_model, f"cuda:{clusterer_gpus[0]}")
+                
+                if trees_to_generate > 0:
+                    logger.info(f"Need to generate {trees_to_generate} more train trees to reach {cfg.trees_per_iteration}.")
+                    rng = random.Random(cfg.seed + iter_number)
+                    indices = rng.sample(range(len(ds)), trees_to_generate)
+                    await process_dataset_lazily(
+                        cfg=cfg,
+                        dataset=ds,
+                        indices=indices,
+                        clusterer=clusterer,
+                        cq_model=cq_model,
+                        answer_model=answer_model,
+                        sentence_analyzer=sentence_analyzer,
+                        N_parallel_trees=25,
+                        out_dir=out_dir
+                    )
+                    print_timer_tree()
+                else:
+                    logger.info(f"Already have {existing_count} train trees for iteration {iter_number}. Skipping generation.")
 
-                await process_dataset_lazily(
-                    cfg=cfg,
-                    dataset=ds,
-                    indices=indices,
-                    clusterer=clusterer,
-                    cq_model=cq_model,
-                    answer_model=answer_model,
-                    sentence_analyzer=sentence_analyzer,
-                    N_parallel_trees=25,
-                    out_dir=out_dir
-                )
-
-                print_timer_tree()
+                if eval_trees_to_generate > 0:
+                    logger.info(f"Need to generate {eval_trees_to_generate} more val trees.")
+                    rng = random.Random(42)
+                    eval_indices = rng.sample(range(len(val_ds)), min(getattr(cfg, 'eval_trees_per_iteration', 50), len(val_ds)))
+                    
+                    await process_dataset_lazily(
+                        cfg=cfg,
+                        dataset=val_ds,
+                        indices=eval_indices,
+                        clusterer=clusterer,
+                        cq_model=cq_model,
+                        answer_model=answer_model,
+                        sentence_analyzer=sentence_analyzer,
+                        N_parallel_trees=25,
+                        out_dir=eval_out_dir
+                    )
+                    print_timer_tree()
+                else:
+                    logger.info(f"Already have {eval_existing_count} val trees. Skipping.")
 
                 logger.info("Unloading semantic clusterer to free memory...")
                 del clusterer
@@ -137,7 +164,19 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 gc.collect()
                 torch.cuda.empty_cache()
             else:
-                logger.info(f"Already have {existing_count} trees for iteration {iter_number}. Skipping generation.")
+                logger.info("All train and val trees already generated. Skipping.")
+
+            logger.info(f"Generating eval visualizations for train trees iteration {iter_number}...")
+            train_eval_output_dir = GENERATED_TREES_PATH / f"{iter_trees_subpath}_train_eval_visualizations"
+            df_inf, df_qp, df_ent = gather_statistics(out_dir)
+            if df_inf is not None:
+                plot_metrics(df_inf, df_qp, df_ent, train_eval_output_dir)
+
+            logger.info(f"Generating eval visualizations for val trees iteration {iter_number}...")
+            val_eval_output_dir = GENERATED_TREES_PATH / f"{eval_trees_subpath}_eval_visualizations"
+            df_inf_val, df_qp_val, df_ent_val = gather_statistics(eval_out_dir)
+            if df_inf_val is not None:
+                plot_metrics(df_inf_val, df_qp_val, df_ent_val, val_eval_output_dir)
 
             # --- Phase 2: SFT Training ---
             logger.info(f"Phase 2: SFT Training for iteration {iter_number}...")
@@ -160,7 +199,8 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
             tree_dirs = [d for d in out_dir.iterdir() if d.is_dir() and (d / "tree.json").exists()]
             tree_dirs.sort()
-            random.shuffle(tree_dirs)
+            rng = random.Random(cfg.seed + iter_number)
+            rng.shuffle(tree_dirs)
             
             val_split_size = int(len(tree_dirs) * cfg.sft_dataset.val_split)
             # Ensure at least 1 val sample if there are trees
@@ -172,7 +212,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             
             logger.info(f"Split {len(tree_dirs)} trees into {len(train_tree_dirs)} train and {len(val_tree_dirs)} val.")
             
-            train_ds = SFTClarificationTreeDataset(
+            sft_train_ds = SFTClarificationTreeDataset(
                 trees_path=None,
                 tree_paths=train_tree_dirs,
                 load_images=False,
@@ -180,7 +220,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
                 top_n=cfg.sft_dataset.top_n
             )
-            val_ds = SFTClarificationTreeDataset(
+            sft_val_ds = SFTClarificationTreeDataset(
                 trees_path=None,
                 tree_paths=val_tree_dirs,
                 load_images=True,
@@ -190,7 +230,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             )
 
             train_loader = DataLoader(
-                train_ds, 
+                sft_train_ds, 
                 batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
                 collate_fn=collate_fn, 
                 shuffle=True,
@@ -198,7 +238,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 pin_memory=True
             )
             val_loader = DataLoader(
-                val_ds, 
+                sft_val_ds, 
                 batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
                 collate_fn=collate_fn, 
                 shuffle=False,
@@ -221,7 +261,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             )
             
             # Free the Transformers model and dataloaders to clear memory before next iteration
-            del model, train_loader, val_loader, collate_fn, train_ds, val_ds
+            del model, train_loader, val_loader, collate_fn, sft_train_ds, sft_val_ds
             import gc
             import torch
             gc.collect()
@@ -232,6 +272,9 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
 @hydra.main(config_path="../../config", config_name="iterative_rl_sft", version_base=None)
 def main(raw_cfg: DictConfig):
+    import logging
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    
     cfg: IterativeRLSFTConfig = parse_iterative_rl_sft_config(raw_cfg)
     print(f"Running Iterative RL SFT with config:\n{cfg.model_dump_json(indent=2)}")
     

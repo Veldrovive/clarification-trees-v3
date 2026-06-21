@@ -1,7 +1,8 @@
 seed: 42
 
 max_iters: 10
-trees_per_iteration: 750
+trees_per_iteration: 1000
+eval_trees_per_iteration: 200
 start_iter: 0
 
 dialog_tree:
@@ -46,8 +47,9 @@ clarification_model:
     lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
     lora_id_postfix: "_rl_sft_iter_0" # Dynamic, but starts at 0
     training_config:
-      epochs: 2
-      evaluate_first: true
+      epochs: 1
+      evaluate_first: false
+      fallback_on_no_improvement: "first_epoch"
       seed: 42
       device: "cuda:0" # Fallback if devices.sft is not directly applied by code, but we'll use devices.sft programmatically
       batch_size: 4
@@ -71,19 +73,19 @@ clarification_model:
         - down_proj
 
 sft_dataset:
-  advantage_threshold: 0.5
+  advantage_threshold: 0.75
   min_reward_threshold: 0.0
   top_n: null
-  batches_per_epoch: 400
+  batches_per_epoch: 350
   eval_batches_per_epoch: 100
   val_split: 0.1
 
 paths:
   data:
-    trees_subpath: v3_rl_sft
+    trees_subpath: v5/rl_sft
   checkpoints:
-    loras_subpath: v3/loras
-    merged_models_subpath: v3/merged_models
+    loras_subpath: v5/loras
+    merged_models_subpath: v5/merged_models
 
 runtime_meta:
   git_commit: null

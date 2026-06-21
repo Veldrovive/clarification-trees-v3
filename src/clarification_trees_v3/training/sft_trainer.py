@@ -284,6 +284,10 @@ def train_loop(
         logger.info("Evaluating before training...")
         best_val_loss = evaluate(model, val_loader, device, global_step, sft_dataset_config.eval_batches_per_epoch, iter_number)
         generate_samples(model, val_loader, device, global_step, iter_number=iter_number)
+        
+        if training_config.fallback_on_no_improvement == "previous_lora":
+            logger.info("Saving initial model as best_adapter fallback.")
+            model.save_adapter(save_dir / "best_adapter", adapter_name="default")
 
     for epoch in range(epochs):
         model.peft_model.train()
@@ -351,6 +355,25 @@ def train_loop(
             if epoch - best_val_loss_epoch >= patience:
                 logger.info(f"No improvement for {patience} epochs. Early stopping.")
                 break
+
+    if best_val_loss_epoch == -1:
+        fallback = training_config.fallback_on_no_improvement
+        if fallback == "first_epoch":
+            logger.info("Validation loss did not improve. Fallback to first epoch.")
+            epoch_0_adapter = save_dir / "epoch_000" / "adapter"
+            if epoch_0_adapter.exists():
+                import shutil
+                shutil.copytree(epoch_0_adapter, save_dir / "best_adapter", dirs_exist_ok=True)
+            else:
+                logger.warning("Epoch 0 adapter not found for fallback.")
+        elif fallback == "last_epoch":
+            logger.info("Validation loss did not improve. Fallback to last epoch.")
+            last_epoch_adapter = save_dir / f"epoch_{epochs-1:03d}" / "adapter"
+            if last_epoch_adapter.exists():
+                import shutil
+                shutil.copytree(last_epoch_adapter, save_dir / "best_adapter", dirs_exist_ok=True)
+            else:
+                logger.warning("Last epoch adapter not found for fallback.")
 
 def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig, paths_config: schema.PathsConfig, iter_number: int) -> TransformersModelV2:
     lora_training_config = model_config.lora_config.training_config
