@@ -29,6 +29,103 @@ from clarification_trees_v3.training.iterative_utils import (
     run_phase_1_tree_generation
 )
 
+def run_sft_training_process(
+    cfg_json: str,
+    iter_number: int,
+    iter_trees_subpath: str,
+    out_dir_str: str,
+    save_dir_str: str,
+    seed: int,
+    wandb_run_id: str | None,
+    wandb_project: str | None
+):
+    import os
+    import copy
+    import random
+    from pathlib import Path
+    import torch
+    from torch.utils.data import DataLoader
+    from clarification_trees_v3.config.iterative_rl_sft_schema import IterativeRLSFTConfig
+    from clarification_trees_v3.training.sft_trainer import get_collate_fn, train_loop, construct_model_with_lora
+    from clarification_trees_v3.dataset.dataset import SFTClarificationTreeDataset
+    
+    import wandb
+    if wandb_run_id and wandb_project:
+        wandb.init(project=wandb_project, id=wandb_run_id, resume="must")
+
+    cfg = IterativeRLSFTConfig.model_validate_json(cfg_json)
+    out_dir = Path(out_dir_str)
+    save_dir = Path(save_dir_str)
+
+    os.environ["ITER_NUMBER"] = str(iter_number)
+    
+    sft_paths_config = copy.deepcopy(cfg.paths)
+    sft_paths_config.data.trees_subpath = iter_trees_subpath
+    
+    sft_gpus = cfg.devices.sft
+    if sft_gpus is not None:
+        cfg.clarification_model.lora_config.training_config.device = f"cuda:{sft_gpus[0]}"
+    
+    model = construct_model_with_lora(cfg.clarification_model, sft_paths_config, iter_number)
+    collate_fn = get_collate_fn(model)
+
+    tree_dirs = [d for d in out_dir.iterdir() if d.is_dir() and (d / "tree.json").exists()]
+    tree_dirs.sort()
+    rng = random.Random(seed + iter_number)
+    rng.shuffle(tree_dirs)
+    
+    val_split_size = int(len(tree_dirs) * cfg.sft_dataset.val_split)
+    if val_split_size == 0 and len(tree_dirs) > 0:
+        val_split_size = 1
+        
+    val_tree_dirs = tree_dirs[:val_split_size]
+    train_tree_dirs = tree_dirs[val_split_size:]
+    
+    sft_train_ds = SFTClarificationTreeDataset(
+        trees_path=None,
+        tree_paths=train_tree_dirs,
+        load_images=False,
+        advantage_threshold=cfg.sft_dataset.advantage_threshold,
+        min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
+        top_n=cfg.sft_dataset.top_n
+    )
+    sft_val_ds = SFTClarificationTreeDataset(
+        trees_path=None,
+        tree_paths=val_tree_dirs,
+        load_images=True,
+        advantage_threshold=cfg.sft_dataset.advantage_threshold,
+        min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
+        top_n=None
+    )
+
+    train_loader = DataLoader(
+        sft_train_ds, 
+        batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
+        collate_fn=collate_fn, 
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True
+    )
+    val_loader = DataLoader(
+        sft_val_ds, 
+        batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
+        collate_fn=collate_fn, 
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    train_loop(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        model_config=cfg.clarification_model,
+        sft_dataset_config=cfg.sft_dataset,
+        save_dir=save_dir,
+        iter_number=iter_number
+    )
+
+
 async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
     assert GENERATED_TREES_PATH is not None
     assert BASE_WEIGHTS_PATH is not None
@@ -168,89 +265,34 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             # Set the environment variable for construct_model_with_lora
             os.environ["ITER_NUMBER"] = str(iter_number)
             
-            # Modify config paths to point to the trees we just generated
-            sft_paths_config = copy.deepcopy(cfg.paths)
-            sft_paths_config.data.trees_subpath = iter_trees_subpath
+            import multiprocessing as mp
+            import wandb
             
-            logger.info("Initializing Transformers model for SFT...")
-            # Set the device using the configured SFT GPU
-            sft_gpus = cfg.devices.sft
-            if sft_gpus is not None:
-                cfg.clarification_model.lora_config.training_config.device = f"cuda:{sft_gpus[0]}"
+            wandb_run_id = wandb.run.id if wandb.run is not None else None
+            wandb_project = cfg.wandb.project
             
-            model = construct_model_with_lora(cfg.clarification_model, sft_paths_config, iter_number)
-            collate_fn = get_collate_fn(model)
+            logger.info("Starting SFT training in a separate process...")
+            ctx = mp.get_context("spawn")
+            p = ctx.Process(
+                target=run_sft_training_process,
+                args=(
+                    cfg.model_dump_json(),
+                    iter_number,
+                    iter_trees_subpath,
+                    str(out_dir),
+                    str(save_dir),
+                    cfg.seed,
+                    wandb_run_id,
+                    wandb_project
+                )
+            )
+            p.start()
+            
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, p.join)
 
-            tree_dirs = [d for d in out_dir.iterdir() if d.is_dir() and (d / "tree.json").exists()]
-            tree_dirs.sort()
-            rng = random.Random(cfg.seed + iter_number)
-            rng.shuffle(tree_dirs)
-            
-            val_split_size = int(len(tree_dirs) * cfg.sft_dataset.val_split)
-            # Ensure at least 1 val sample if there are trees
-            if val_split_size == 0 and len(tree_dirs) > 0:
-                val_split_size = 1
-                
-            val_tree_dirs = tree_dirs[:val_split_size]
-            train_tree_dirs = tree_dirs[val_split_size:]
-            
-            logger.info(f"Split {len(tree_dirs)} trees into {len(train_tree_dirs)} train and {len(val_tree_dirs)} val.")
-            
-            sft_train_ds = SFTClarificationTreeDataset(
-                trees_path=None,
-                tree_paths=train_tree_dirs,
-                load_images=False,
-                advantage_threshold=cfg.sft_dataset.advantage_threshold,
-                min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
-                top_n=cfg.sft_dataset.top_n
-            )
-            sft_val_ds = SFTClarificationTreeDataset(
-                trees_path=None,
-                tree_paths=val_tree_dirs,
-                load_images=True,
-                advantage_threshold=cfg.sft_dataset.advantage_threshold,
-                min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
-                top_n=None
-            )
-
-            train_loader = DataLoader(
-                sft_train_ds, 
-                batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
-                collate_fn=collate_fn, 
-                shuffle=True,
-                num_workers=4,
-                pin_memory=True
-            )
-            val_loader = DataLoader(
-                sft_val_ds, 
-                batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
-                collate_fn=collate_fn, 
-                shuffle=False,
-                num_workers=4,
-                pin_memory=True
-            )
-
-            # save_dir already defined above
-
-            
-            train_loop(
-                model=model,
-                train_loader=train_loader,
-                val_loader=val_loader,
-                model_config=cfg.clarification_model,
-                sft_dataset_config=cfg.sft_dataset,
-                save_dir=save_dir,
-                iter_number=iter_number
-            )
-            
-            # Free the Transformers model and dataloaders to clear memory before next iteration
-            del model, train_loader, val_loader, collate_fn, sft_train_ds, sft_val_ds
-            import gc
-            import torch
-            gc.collect()
-            torch.cuda.empty_cache()
-            if hasattr(torch.cuda, "ipc_collect"):
-                torch.cuda.ipc_collect()
+            if p.exitcode != 0:
+                raise RuntimeError(f"SFT training process failed with exit code {p.exitcode}")
                 
             if cfg.stop_vllm_during_sft:
                 logger.info(f"Waiting {cfg.vllm_restart_delay} seconds for memory to clear before restarting vLLM...")
