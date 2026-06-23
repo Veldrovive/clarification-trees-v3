@@ -12,6 +12,7 @@ class IterativeRLSFTConfig(Config):
     sft_dataset: SFTTreeDatasetConfig
     eval_trees_per_iteration: int = 50
     stop_vllm_during_sft: bool = False
+    vllm_restart_delay: int = 30
 
 def parse_iterative_rl_sft_config(cfg: DictConfig) -> IterativeRLSFTConfig:
     """Parse the Hydra config into a Pydantic IterativeRLSFTConfig object."""

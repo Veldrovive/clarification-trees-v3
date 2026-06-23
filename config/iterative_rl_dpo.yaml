@@ -5,6 +5,7 @@ trees_per_iteration: 500
 eval_trees_per_iteration: 100
 start_iter: 0
 stop_vllm_during_dpo: true
+vllm_restart_delay: 30
 
 dialog_tree:
   max_depth: 3
@@ -83,9 +84,9 @@ dpo_dataset:
 
 paths:
   data:
-    trees_subpath: dpo/v1_new_ref/rl_dpo
+    trees_subpath: dpo/v2_new_ref/rl_dpo
   checkpoints:
-    loras_subpath: dpo/v1_new_ref/loras
+    loras_subpath: dpo/v2_new_ref/loras
     merged_models_subpath: v2/merged_models
 
 runtime_meta:

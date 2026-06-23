@@ -96,7 +96,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 continue
 
             # --- Phase 1: Tree Generation ---
-            await run_phase_1_tree_generation(
+            df_inf, df_qp, df_ent, df_inf_val, df_qp_val, df_ent_val = await run_phase_1_tree_generation(
                 cfg=cfg,
                 raw_cfg=raw_cfg,
                 iter_number=iter_number,
@@ -108,6 +108,42 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 answer_model=answer_model,
                 sentence_analyzer=sentence_analyzer
             )
+
+            import wandb
+            if wandb.run is not None:
+                metrics = {"iteration": iter_number}
+                
+                # Train metrics
+                if df_inf is not None and not df_inf.empty:
+                    for depth in sorted(df_inf['Depth'].unique()):
+                        depth_scores = df_inf[df_inf['Depth'] == depth]['Score']
+                        metrics[f"train/avg_reward_at_depth_{depth}"] = depth_scores.mean()
+                        metrics[f"train/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
+                if df_qp is not None and not df_qp.empty:
+                    for depth in sorted(df_qp['Depth'].unique()):
+                        depth_scores = df_qp[df_qp['Depth'] == depth]['Score']
+                        metrics[f"train/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
+                if df_ent is not None and not df_ent.empty:
+                    for depth in sorted(df_ent['Depth'].unique()):
+                        depth_scores = df_ent[df_ent['Depth'] == depth]['Score']
+                        metrics[f"train/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
+                        
+                # Val metrics
+                if df_inf_val is not None and not df_inf_val.empty:
+                    for depth in sorted(df_inf_val['Depth'].unique()):
+                        depth_scores = df_inf_val[df_inf_val['Depth'] == depth]['Score']
+                        metrics[f"val/avg_reward_at_depth_{depth}"] = depth_scores.mean()
+                        metrics[f"val/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
+                if df_qp_val is not None and not df_qp_val.empty:
+                    for depth in sorted(df_qp_val['Depth'].unique()):
+                        depth_scores = df_qp_val[df_qp_val['Depth'] == depth]['Score']
+                        metrics[f"val/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
+                if df_ent_val is not None and not df_ent_val.empty:
+                    for depth in sorted(df_ent_val['Depth'].unique()):
+                        depth_scores = df_ent_val[df_ent_val['Depth'] == depth]['Score']
+                        metrics[f"val/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
+                        
+                wandb.log(metrics)
 
             # --- Phase 2: SFT Training ---
             logger.info(f"Phase 2: SFT Training for iteration {iter_number}...")
@@ -123,6 +159,11 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                    if hasattr(torch.cuda, "ipc_collect"):
+                        torch.cuda.ipc_collect()
+                        
+                logger.info("Waiting 5 seconds for vLLM processes to fully terminate...")
+                await asyncio.sleep(5)
             
             # Set the environment variable for construct_model_with_lora
             os.environ["ITER_NUMBER"] = str(iter_number)
@@ -208,6 +249,12 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             import torch
             gc.collect()
             torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+                
+            if cfg.stop_vllm_during_sft:
+                logger.info(f"Waiting {cfg.vllm_restart_delay} seconds for memory to clear before restarting vLLM...")
+                await asyncio.sleep(cfg.vllm_restart_delay)
             
             logger.info(f"=== Completed Iteration {iter_number} ===")
 
@@ -231,6 +278,10 @@ def main(raw_cfg: DictConfig):
         config=cfg.model_dump(),
         name=wandb_name
     )
+    
+    wandb.define_metric("iteration")
+    wandb.define_metric("train/*", step_metric="iteration")
+    wandb.define_metric("val/*", step_metric="iteration")
     
     asyncio.run(run_iterative_loop(cfg, raw_cfg))
     

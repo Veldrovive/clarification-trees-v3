@@ -127,3 +127,5 @@ async def run_phase_1_tree_generation(
     df_inf_val, df_qp_val, df_ent_val = gather_statistics(eval_out_dir)
     if df_inf_val is not None:
         plot_metrics(df_inf_val, df_qp_val, df_ent_val, val_eval_output_dir)
+
+    return df_inf, df_qp, df_ent, df_inf_val, df_qp_val, df_ent_val

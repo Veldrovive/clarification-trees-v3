@@ -4,7 +4,8 @@ max_iters: 10
 trees_per_iteration: 500
 eval_trees_per_iteration: 100
 start_iter: 0
-stop_vllm_during_sft: true
+stop_vllm_during_sft: false
+vllm_restart_delay: 30
 
 dialog_tree:
   max_depth: 3
@@ -18,7 +19,7 @@ devices:
   clarification: [2]
   answer: [1]
   semantic_cluster: [0]
-  sft: [2]
+  sft: [0]
 
 remote_vllm:
   clarification:
@@ -83,9 +84,9 @@ sft_dataset:
 
 paths:
   data:
-    trees_subpath: sft/v1_2_epochs/rl_sft
+    trees_subpath: sft/v2_2_epochs/rl_sft
   checkpoints:
-    loras_subpath: sft/v1_2_epochs/loras
+    loras_subpath: sft/v2_2_epochs/loras
     merged_models_subpath: v2/merged_models
 
 runtime_meta:
