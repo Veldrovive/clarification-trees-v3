@@ -15,24 +15,24 @@ dialog_tree:
   inference_diverse_sample_count: 5
 
 devices:
-  clarification: [2]
-  answer: [1]
-  semantic_cluster: [3]
-  sft: [2]
+  clarification: [3]
+  answer: [4]
+  semantic_cluster: [0]
+  sft: [4]
 
 remote_vllm:
   clarification:
-    port: 29002
+    port: 29004
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
-    log_file: "clarification_vllm_remote.log"
+    log_file: "clarification_vllm_remote_dpo.log"
   answer:
-    port: 29003
+    port: 29005
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
-    log_file: "answer_vllm_remote.log"
+    log_file: "answer_vllm_remote_dpo.log"
 
 defaults:
   - _self_
@@ -83,10 +83,10 @@ dpo_dataset:
 
 paths:
   data:
-    trees_subpath: dpo/v0/rl_dpo
+    trees_subpath: dpo/v1_new_ref/rl_dpo
   checkpoints:
-    loras_subpath: dpo/v0/loras
-    merged_models_subpath: v5/merged_models
+    loras_subpath: dpo/v1_new_ref/loras
+    merged_models_subpath: v2/merged_models
 
 runtime_meta:
   git_commit: null

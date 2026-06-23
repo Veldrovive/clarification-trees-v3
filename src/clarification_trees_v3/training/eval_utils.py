@@ -106,7 +106,7 @@ def plot_metrics(df_inf: pd.DataFrame, df_qp: pd.DataFrame, df_ent: pd.DataFrame
     sns.set_theme(style="whitegrid")
     
     datasets = [
-        (df_inf, "Inference Score", "depth_vs_inference.png", "Depth vs. Inference Score (Final Answer Quality)", (0, 1)),
+        (df_inf, "Inference Score", "depth_vs_inference.png", "Depth vs. Inference Score (Final Answer Quality)", (None, None)),
         (df_qp, "Question Presence Cost", "depth_vs_qp.png", "Depth vs. Question Presence Cost", (None, 0)),
         (df_ent, "Entailment Cost", "depth_vs_entailment.png", "Depth vs. Entailment Cost (Redundancy Penalty)", (None, 0))
     ]
@@ -120,7 +120,7 @@ def plot_metrics(df_inf: pd.DataFrame, df_qp: pd.DataFrame, df_ent: pd.DataFrame
         
         # Using a boxplot overlaid with a pointplot to show both distribution and mean trend
         # sns.boxplot(data=df, x="Depth", y="Score", color="lightblue", showfliers=False)
-        sns.pointplot(data=df, x="Depth", y="Score", color="darkblue", errorbar=None, markers="D", linestyles="--")
+        sns.pointplot(data=df, x="Depth", y="Score", color="darkblue", errorbar=None, markers="D", linestyles="--", linewidth=1, markersize=4)
         
         plt.title(title, fontsize=14, pad=15)
         plt.xlabel("Dialogue Depth (Number of Clarification Questions)", fontsize=12)
@@ -145,7 +145,7 @@ def plot_stacked_metrics(df_inf: pd.DataFrame, df_qp: pd.DataFrame, df_ent: pd.D
     sns.set_theme(style="whitegrid")
     
     datasets = [
-        (df_inf, "Inference Score", "stacked_depth_vs_inference.png", "Depth vs. Inference Score over Iterations", (0, 1)),
+        (df_inf, "Inference Score", "stacked_depth_vs_inference.png", "Depth vs. Inference Score over Iterations", (None, None)),
         (df_qp, "Question Presence Cost", "stacked_depth_vs_qp.png", "Depth vs. Question Presence Cost over Iterations", (None, 0)),
         (df_ent, "Entailment Cost", "stacked_depth_vs_entailment.png", "Depth vs. Entailment Cost over Iterations", (None, 0))
     ]
@@ -158,7 +158,7 @@ def plot_stacked_metrics(df_inf: pd.DataFrame, df_qp: pd.DataFrame, df_ent: pd.D
         plt.figure(figsize=(10, 6))
         
         # Pointplot with hue="Iteration" to stack them
-        sns.pointplot(data=df, x="Depth", y="Score", hue="Iteration", errorbar=None, markers="D", linestyles="--", palette="tab10")
+        sns.pointplot(data=df, x="Depth", y="Score", hue="Iteration", errorbar=None, markers="D", linestyles="--", palette="tab10", linewidth=1, markersize=4)
         
         plt.title(title, fontsize=14, pad=15)
         plt.xlabel("Dialogue Depth (Number of Clarification Questions)", fontsize=12)

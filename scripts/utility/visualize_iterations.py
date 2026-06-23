@@ -1,21 +1,30 @@
 import os
-import hydra
-from omegaconf import DictConfig
+import argparse
 import pandas as pd
 from logging import getLogger
+from pathlib import Path
 
-from clarification_trees_v3.config.iterative_rl_sft_schema import IterativeRLSFTConfig, parse_iterative_rl_sft_config
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH
 from clarification_trees_v3.training.eval_utils import gather_statistics, plot_stacked_metrics
 
 logger = getLogger(__name__)
 
-@hydra.main(config_path="../../config", config_name="iterative_rl_sft", version_base=None)
-def main(raw_cfg: DictConfig):
-    cfg: IterativeRLSFTConfig = parse_iterative_rl_sft_config(raw_cfg)
-    print(f"Running Visualize Iterations with config:\n{cfg.model_dump_json(indent=2)}")
-    
-    assert GENERATED_TREES_PATH is not None, "GENERATED_TREES_PATH is not defined"
+def main():
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    parser = argparse.ArgumentParser(description="Visualize Iterations")
+    parser.add_argument("--parent_dir", type=str, default=str(GENERATED_TREES_PATH),
+                        help="Parent directory containing the generated trees")
+    parser.add_argument("--template", type=str, required=True,
+                        help="Template prefix for subdirectories, e.g., 'v3_rl_sft_'")
+    parser.add_argument("--start_iter", type=int, default=0,
+                        help="Starting iteration number")
+    parser.add_argument("--max_iters", type=int, default=10,
+                        help="Maximum number of iterations")
+    args = parser.parse_args()
+
+    parent_dir = Path(args.parent_dir)
+    print(f"Running Visualize Iterations with template: {args.template} in {parent_dir}")
     
     train_dfs_inf = []
     train_dfs_qp = []
@@ -25,12 +34,12 @@ def main(raw_cfg: DictConfig):
     val_dfs_qp = []
     val_dfs_ent = []
     
-    for iter_number in range(cfg.start_iter, cfg.max_iters):
+    for iter_number in range(args.start_iter, args.max_iters):
         logger.info(f"Gathering statistics for Iteration {iter_number}...")
         
         # Train trees
-        iter_trees_subpath = f"{cfg.paths.data.trees_subpath}_iter_{iter_number}"
-        out_dir = GENERATED_TREES_PATH / iter_trees_subpath
+        iter_trees_subpath = f"{args.template}iter_{iter_number}"
+        out_dir = parent_dir / iter_trees_subpath
         
         if out_dir.exists():
             df_inf, df_qp, df_ent = gather_statistics(out_dir)
@@ -47,8 +56,8 @@ def main(raw_cfg: DictConfig):
             logger.info(f"Train trees directory not found for iteration {iter_number}: {out_dir}")
             
         # Val trees
-        eval_trees_subpath = f"{cfg.paths.data.trees_subpath}_eval_iter_{iter_number}"
-        eval_out_dir = GENERATED_TREES_PATH / eval_trees_subpath
+        eval_trees_subpath = f"{args.template}eval_iter_{iter_number}"
+        eval_out_dir = parent_dir / eval_trees_subpath
         
         if eval_out_dir.exists():
             df_inf_val, df_qp_val, df_ent_val = gather_statistics(eval_out_dir)
@@ -70,7 +79,7 @@ def main(raw_cfg: DictConfig):
         combined_train_qp = pd.concat(train_dfs_qp, ignore_index=True) if train_dfs_qp else pd.DataFrame()
         combined_train_ent = pd.concat(train_dfs_ent, ignore_index=True) if train_dfs_ent else pd.DataFrame()
         
-        train_output_dir = GENERATED_TREES_PATH / "stacked_train_visualizations"
+        train_output_dir = parent_dir / f"{args.template}stacked_train_visualizations"
         plot_stacked_metrics(combined_train_inf, combined_train_qp, combined_train_ent, train_output_dir)
     else:
         logger.info("No train metrics gathered.")
@@ -81,7 +90,7 @@ def main(raw_cfg: DictConfig):
         combined_val_qp = pd.concat(val_dfs_qp, ignore_index=True) if val_dfs_qp else pd.DataFrame()
         combined_val_ent = pd.concat(val_dfs_ent, ignore_index=True) if val_dfs_ent else pd.DataFrame()
         
-        val_output_dir = GENERATED_TREES_PATH / "stacked_val_visualizations"
+        val_output_dir = parent_dir / f"{args.template}stacked_val_visualizations"
         plot_stacked_metrics(combined_val_inf, combined_val_qp, combined_val_ent, val_output_dir)
     else:
         logger.info("No val metrics gathered.")

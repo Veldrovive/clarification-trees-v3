@@ -26,13 +26,13 @@ remote_vllm:
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
-    log_file: "clarification_vllm_remote.log"
+    log_file: "clarification_vllm_remote_sft.log"
   answer:
     port: 29003
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
-    log_file: "answer_vllm_remote.log"
+    log_file: "answer_vllm_remote_sft.log"
 
 defaults:
   - _self_
