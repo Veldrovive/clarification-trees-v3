@@ -113,12 +113,16 @@ class ClarificationTreeDataset(Dataset):
         transform = None,
         load_images: bool = True,
         precompute_rewards: bool = True,
+        positive_reward_threshold: float | None = None,
+        require_multiple_children: bool = False,
     ):
         self.trees_path = trees_path
         self.tree_paths = tree_paths
         self.transform = transform
         self.load_images = load_images
         self.precompute_rewards = precompute_rewards
+        self.positive_reward_threshold = positive_reward_threshold
+        self.require_multiple_children = require_multiple_children
 
         assert self.trees_path is None or self.tree_paths is None, "One of trees_path or tree_paths must be None"
         assert self.tree_paths is not None or self.tree_paths is not None, "One of trees_path or tree_paths must not be None"
@@ -164,7 +168,7 @@ class ClarificationTreeDataset(Dataset):
             trees.append(tree)
             sidecars.append(sidecar)
             if self.precompute_rewards:
-                sidecar.compute_rewards()  # Caches the rewards and advantages
+                sidecar.compute_rewards(tree)  # Caches the rewards and advantages
                 cached_reward_tree_idxs.add(tree_idx)
 
             for parent_node_idx, parent_node in tree.get_nodes():
@@ -183,6 +187,20 @@ class ClarificationTreeDataset(Dataset):
 
                 if filtered_child_size == 0:
                     continue
+
+                # Filter by positive_reward_threshold if provided
+                if self.positive_reward_threshold is not None:
+                    max_reward = max([sidecar.reward_cache[idx] for idx in child_cq_idxs])
+                    if max_reward < self.positive_reward_threshold:
+                        continue
+
+                # For DPO, we need at least two children with different rewards
+                if self.require_multiple_children:
+                    if len(child_cq_idxs) < 2:
+                        continue
+                    rewards = [sidecar.reward_cache[idx] for idx in child_cq_idxs]
+                    if max(rewards) == min(rewards):
+                        continue
             
                 num_parents += 1
                 
@@ -211,7 +229,7 @@ class ClarificationTreeDataset(Dataset):
         child_node_idxs = sample["child_node_idxs"]
 
         if tree_index not in self.cached_reward_tree_idxs:
-            self.sidecars[tree_index].compute_rewards()
+            self.sidecars[tree_index].compute_rewards(self.trees[tree_index])
             self.cached_reward_tree_idxs.add(tree_index)
 
         tree = self.trees[tree_index]
@@ -300,7 +318,7 @@ class SFTClarificationTreeDataset(Dataset):
             trees.append(tree)
             sidecars.append(sidecar)
             
-            sidecar.compute_rewards()
+            sidecar.compute_rewards(tree)
 
             for parent_node_idx, parent_node in tree.get_nodes():
                 child_cq_idxs = tree.get_children_idxs(parent_node_idx, type_filter=NodeType.CLARIFICATION_QUESTION)

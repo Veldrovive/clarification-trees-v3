@@ -1,5 +1,4 @@
 import os
-import shutil
 import random
 import asyncio
 from pathlib import Path
@@ -9,27 +8,19 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 import copy
 
-from clarification_trees_v3.config.iterative_rl_sft_schema import IterativeRLSFTConfig, parse_iterative_rl_sft_config
+from clarification_trees_v3.config.iterative_rl_dpo_schema import IterativeRLDPOConfig, parse_iterative_rl_dpo_config
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH, BASE_WEIGHTS_PATH
 from clarification_trees_v3.utils import set_seed, SentenceAnalyzer
-from clarification_trees_v3.dataset.dataset import ClearVQADataset, SFTClarificationTreeDataset
+from clarification_trees_v3.dataset.dataset import ClearVQADataset, ClarificationTreeDataset
 from clarification_trees_v3.models.utils import use_models
-from clarification_trees_v3.models import construct_semantic_clusterer
-from clarification_trees_v3.dataset.tree_generation import process_dataset_lazily, print_timer_tree
-from clarification_trees_v3.training.sft_trainer import get_collate_fn, train_loop, construct_model_with_lora
-from clarification_trees_v3.training.eval_utils import gather_statistics, plot_metrics
+from clarification_trees_v3.training.sft_trainer import construct_model_with_lora
+from clarification_trees_v3.training.dpo_trainer import get_dpo_collate_fn, dpo_train_loop
+from clarification_trees_v3.training.iterative_utils import get_lora_path, run_phase_1_tree_generation
 
 from logging import getLogger
 logger = getLogger(__name__)
 
-from clarification_trees_v3.training.iterative_utils import (
-    check_and_clean_malformed_trees,
-    get_completed_trees_count,
-    get_lora_path,
-    run_phase_1_tree_generation
-)
-
-async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
+async def run_iterative_loop(cfg: IterativeRLDPOConfig, raw_cfg: DictConfig):
     assert GENERATED_TREES_PATH is not None
     assert BASE_WEIGHTS_PATH is not None
 
@@ -42,7 +33,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
         cfg.clarification_model.lora_config.use_lora = False
     else:
         cfg.clarification_model.lora_config.use_lora = True
-        cfg.clarification_model.lora_config.lora_id_postfix = f"_rl_sft_iter_{cfg.start_iter - 1}"
+        cfg.clarification_model.lora_config.lora_id_postfix = f"_rl_dpo_iter_{cfg.start_iter - 1}"
 
     async with use_models(cfg) as (cq_model, answer_model):
         for iter_number in range(cfg.start_iter, cfg.max_iters):
@@ -51,7 +42,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             # --- LoRA Swapping Phase ---
             if iter_number > cfg.start_iter:
                 cfg.clarification_model.lora_config.use_lora = True
-                cfg.clarification_model.lora_config.lora_id_postfix = f"_rl_sft_iter_{iter_number - 1}"
+                cfg.clarification_model.lora_config.lora_id_postfix = f"_rl_dpo_iter_{iter_number - 1}"
                 lora_id = cfg.clarification_model.lora_config.lora_id
                 lora_dir_name = f"{lora_id}{cfg.clarification_model.lora_config.lora_id_postfix}"
                 
@@ -76,7 +67,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             # Check if this iteration's LoRA is already trained
             lora_id = cfg.clarification_model.lora_config.lora_id
             lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(cfg.paths.checkpoints.loras_subpath)
-            save_dir = lora_checkpoint_path / f"{lora_id}_rl_sft_iter_{iter_number}"
+            save_dir = lora_checkpoint_path / f"{lora_id}_rl_dpo_iter_{iter_number}"
             
             current_lora_path = get_lora_path(save_dir)
             if current_lora_path is not None:
@@ -97,31 +88,31 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 sentence_analyzer=sentence_analyzer
             )
 
-            # --- Phase 2: SFT Training ---
-            logger.info(f"Phase 2: SFT Training for iteration {iter_number}...")
+            # --- Phase 2: DPO Training ---
+            logger.info(f"Phase 2: DPO Training for iteration {iter_number}...")
             
             # Set the environment variable for construct_model_with_lora
             os.environ["ITER_NUMBER"] = str(iter_number)
             
             # Modify config paths to point to the trees we just generated
-            sft_paths_config = copy.deepcopy(cfg.paths)
-            sft_paths_config.data.trees_subpath = iter_trees_subpath
+            dpo_paths_config = copy.deepcopy(cfg.paths)
+            dpo_paths_config.data.trees_subpath = iter_trees_subpath
             
-            logger.info("Initializing Transformers model for SFT...")
-            # Set the device using the configured SFT GPU
+            logger.info("Initializing Transformers model for DPO...")
+            # Set the device using the configured SFT GPU (re-used for DPO)
             sft_gpus = cfg.devices.sft
             if sft_gpus is not None:
                 cfg.clarification_model.lora_config.training_config.device = f"cuda:{sft_gpus[0]}"
             
-            model = construct_model_with_lora(cfg.clarification_model, sft_paths_config, iter_number)
-            collate_fn = get_collate_fn(model)
+            model = construct_model_with_lora(cfg.clarification_model, dpo_paths_config, iter_number, postfix_pattern="_rl_dpo_iter_{}")
+            collate_fn = get_dpo_collate_fn(model, cfg.dpo_dataset)
 
             tree_dirs = [d for d in out_dir.iterdir() if d.is_dir() and (d / "tree.json").exists()]
             tree_dirs.sort()
             rng = random.Random(cfg.seed + iter_number)
             rng.shuffle(tree_dirs)
             
-            val_split_size = int(len(tree_dirs) * cfg.sft_dataset.val_split)
+            val_split_size = int(len(tree_dirs) * cfg.dpo_dataset.val_split)
             # Ensure at least 1 val sample if there are trees
             if val_split_size == 0 and len(tree_dirs) > 0:
                 val_split_size = 1
@@ -131,25 +122,25 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             
             logger.info(f"Split {len(tree_dirs)} trees into {len(train_tree_dirs)} train and {len(val_tree_dirs)} val.")
             
-            sft_train_ds = SFTClarificationTreeDataset(
+            dpo_train_ds = ClarificationTreeDataset(
                 trees_path=None,
                 tree_paths=train_tree_dirs,
                 load_images=False,
-                advantage_threshold=cfg.sft_dataset.advantage_threshold,
-                min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
-                top_n=cfg.sft_dataset.top_n
+                precompute_rewards=True,
+                positive_reward_threshold=cfg.dpo_dataset.positive_reward_threshold,
+                require_multiple_children=True
             )
-            sft_val_ds = SFTClarificationTreeDataset(
+            dpo_val_ds = ClarificationTreeDataset(
                 trees_path=None,
                 tree_paths=val_tree_dirs,
                 load_images=True,
-                advantage_threshold=cfg.sft_dataset.advantage_threshold,
-                min_reward_threshold=cfg.sft_dataset.min_reward_threshold,
-                top_n=None
+                precompute_rewards=True,
+                positive_reward_threshold=cfg.dpo_dataset.positive_reward_threshold,
+                require_multiple_children=True
             )
 
             train_loader = DataLoader(
-                sft_train_ds, 
+                dpo_train_ds, 
                 batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
                 collate_fn=collate_fn, 
                 shuffle=True,
@@ -157,7 +148,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 pin_memory=True
             )
             val_loader = DataLoader(
-                sft_val_ds, 
+                dpo_val_ds, 
                 batch_size=cfg.clarification_model.lora_config.training_config.batch_size, 
                 collate_fn=collate_fn, 
                 shuffle=False,
@@ -168,18 +159,19 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             # save_dir already defined above
 
             
-            train_loop(
+            dpo_train_loop(
                 model=model,
                 train_loader=train_loader,
                 val_loader=val_loader,
                 model_config=cfg.clarification_model,
-                sft_dataset_config=cfg.sft_dataset,
+                dpo_dataset_config=cfg.dpo_dataset,
+                beta=cfg.beta,
                 save_dir=save_dir,
                 iter_number=iter_number
             )
             
             # Free the Transformers model and dataloaders to clear memory before next iteration
-            del model, train_loader, val_loader, collate_fn, sft_train_ds, sft_val_ds
+            del model, train_loader, val_loader, collate_fn, dpo_train_ds, dpo_val_ds
             import gc
             import torch
             gc.collect()
@@ -188,20 +180,18 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             logger.info(f"=== Completed Iteration {iter_number} ===")
 
 
-@hydra.main(config_path="../../config", config_name="iterative_rl_sft", version_base=None)
+@hydra.main(config_path="../../config", config_name="iterative_rl_dpo", version_base=None)
 def main(raw_cfg: DictConfig):
     import logging
     logging.getLogger("httpx").setLevel(logging.WARNING)
     
-    cfg: IterativeRLSFTConfig = parse_iterative_rl_sft_config(raw_cfg)
-    print(f"Running Iterative RL SFT with config:\n{cfg.model_dump_json(indent=2)}")
+    cfg: IterativeRLDPOConfig = parse_iterative_rl_dpo_config(raw_cfg)
+    print(f"Running Iterative RL DPO with config:\n{cfg.model_dump_json(indent=2)}")
     
     set_seed(cfg.seed)
     
-    # Enable W&B if needed, but since it loops, we can init here.
-    # W&B can log multiple steps over time.
     import wandb
-    wandb_name = cfg.wandb.name if cfg.wandb.name else f"iterative_rl_sft_{cfg.clarification_model.lora_config.lora_id}"
+    wandb_name = cfg.wandb.name if cfg.wandb.name else f"iterative_rl_dpo_{cfg.clarification_model.lora_config.lora_id}"
     wandb.init(
         project=cfg.wandb.project,
         config=cfg.model_dump(),

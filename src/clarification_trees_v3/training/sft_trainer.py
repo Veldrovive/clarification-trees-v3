@@ -375,7 +375,7 @@ def train_loop(
             else:
                 logger.warning("Last epoch adapter not found for fallback.")
 
-def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig, paths_config: schema.PathsConfig, iter_number: int) -> TransformersModelV2:
+def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModelConfig, paths_config: schema.PathsConfig, iter_number: int, postfix_pattern: str = "_rl_sft_iter_{}") -> TransformersModelV2:
     lora_training_config = model_config.lora_config.training_config
     device = lora_training_config.device
 
@@ -391,7 +391,7 @@ def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModel
         lora_checkpoint_path = BASE_WEIGHTS_PATH / Path(paths_config.checkpoints.loras_subpath)
         lora_id = model_config.lora_config.lora_id
         
-        prev_adapter_path = lora_checkpoint_path / f"{lora_id}_rl_sft_iter_{prev_iter}" / "best_adapter"
+        prev_adapter_path = lora_checkpoint_path / f"{lora_id}{postfix_pattern.format(prev_iter)}" / "best_adapter"
         
         logger.info(f"Iteration {iter_number}: Loading previous LoRA adapter from {prev_adapter_path}...")
         model.load_adapter(prev_adapter_path, adapter_name="default", is_trainable=True)

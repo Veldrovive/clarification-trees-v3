@@ -529,7 +529,7 @@ class TreeSidecar:
 
         return advantages
 
-    def compute_rewards(self):
+    def compute_rewards(self, tree: DialogTree | None = None):
         """
         We compute rewards using a backtracking DFS.
         We use an optimal stopping criterion to decide where reward comes from.
@@ -537,7 +537,8 @@ class TreeSidecar:
         Then, we compute the expected reward for deferring by taking the expected reward of all non-INFERENCE children.
         The reward for this node is the max of these two values.
         """
-        tree = DialogTree.load(self.tree_path)
+        if tree is None:
+            tree = DialogTree.load(self.tree_path)
         rewards = {}
         self._compute_reward_recursive(tree, rewards, DialogTree.ROOT)
         self.reward_cache = rewards
@@ -573,6 +574,12 @@ class TreeSidecar:
         with open(input_path, "r") as f:
             data = json.load(f)
         tree_path = Path(data["tree_path"])
+        
+        if not tree_path.exists():
+            local_tree_path = input_path.parent / tree_path.name
+            if local_tree_path.exists():
+                tree_path = local_tree_path
+                
         tree_sidecar = cls(tree_path)
         tree_sidecar.inference_scores = {int(k): v for k, v in data["inference_scores"].items()}
         tree_sidecar.inference_scores_raw = {int(k): v for k, v in data["inference_scores_raw"].items()}
@@ -609,7 +616,7 @@ def visualize_tree(dialog_tree: DialogTree, tree_sidecar: TreeSidecar | None = N
 
     # Cache the rewards
     if tree_sidecar is not None:
-        tree_sidecar.compute_rewards()
+        tree_sidecar.compute_rewards(dialog_tree)
     
     for idx, (parent_idx, node) in enumerate(dialog_tree.nodes):
         

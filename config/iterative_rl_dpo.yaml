@@ -16,8 +16,8 @@ dialog_tree:
 devices:
   clarification: [2]
   answer: [1]
-  semantic_cluster: [3]
-  sft: [3]
+  semantic_cluster: [4]
+  sft: [4]
 
 remote_vllm:
   clarification:
@@ -40,25 +40,26 @@ defaults:
   - answer_model/lora: qwen_3_vl_32b
   - semantic_cluster_model: bidirectional_entailment_clusterer
 
-# Override specific training configuration inside lora_config for SFT
+beta: 0.1
+
 clarification_model:
   lora_config:
     use_lora: true
     lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
-    lora_id_postfix: "_rl_sft_iter_0" # Dynamic, but starts at 0
+    lora_id_postfix: "_rl_dpo_iter_0" 
     training_config:
       epochs: 1
       evaluate_first: false
       fallback_on_no_improvement: "first_epoch"
       seed: 42
-      device: "cuda:0" # Fallback if devices.sft is not directly applied by code, but we'll use devices.sft programmatically
-      batch_size: 4
-      lr: 1e-4
+      device: "cuda:0" 
+      batch_size: 2
+      lr: 1e-5
       weight_decay: 0.01
-      gradient_accumulation_steps: 4
+      gradient_accumulation_steps: 8
       max_grad_norm: 1.0
       warmup_ratio: 0.03
-      patience: 100 # Disable early stopping effectively, but save_best will still work
+      patience: 100
     peft_config:
       r: 8
       lora_alpha: 16
@@ -72,19 +73,18 @@ clarification_model:
         - up_proj
         - down_proj
 
-sft_dataset:
-  advantage_threshold: 0.75
-  min_reward_threshold: 0.0
-  top_n: null
+dpo_dataset:
+  positive_reward_threshold: 0.0
+  pair_selection_method: "top-random"
   batches_per_epoch: 350
   eval_batches_per_epoch: 100
   val_split: 0.1
 
 paths:
   data:
-    trees_subpath: sft/v0/rl_sft
+    trees_subpath: dpo/v0/rl_dpo
   checkpoints:
-    loras_subpath: sft/v0/loras
+    loras_subpath: dpo/v0/loras
     merged_models_subpath: v5/merged_models
 
 runtime_meta:
@@ -92,5 +92,5 @@ runtime_meta:
   git_strict: true
 
 wandb:
-  project: "iterative-sft-rl-tree"
+  project: "iterative-dpo-rl-tree"
   name: null
