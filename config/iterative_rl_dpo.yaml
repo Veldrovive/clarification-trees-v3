@@ -4,6 +4,7 @@ max_iters: 10
 trees_per_iteration: 500
 eval_trees_per_iteration: 100
 start_iter: 0
+stop_vllm_during_dpo: true
 
 dialog_tree:
   max_depth: 3
@@ -16,8 +17,8 @@ dialog_tree:
 devices:
   clarification: [2]
   answer: [1]
-  semantic_cluster: [4]
-  sft: [4]
+  semantic_cluster: [3]
+  sft: [2]
 
 remote_vllm:
   clarification:

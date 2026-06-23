@@ -25,6 +25,8 @@ def get_dpo_collate_fn(model: TransformersModelV2, dpo_dataset_config: DPOTreeDa
     def dpo_sample_collate(batch: list[ClarificationTreeSample]):
         chosen_samples = []
         rejected_samples = []
+        chosen_ref_logps_list = []
+        rejected_ref_logps_list = []
         
         for sample in batch:
             tree = sample.tree
@@ -71,6 +73,15 @@ def get_dpo_collate_fn(model: TransformersModelV2, dpo_dataset_config: DPOTreeDa
             for chosen_idx, rejected_idx in pairs:
                 chosen_target = tree.get_node(chosen_idx).response
                 rejected_target = tree.get_node(rejected_idx).response
+                
+                c_idx_in_child = child_idxs.index(chosen_idx)
+                r_idx_in_child = child_idxs.index(rejected_idx)
+                
+                c_ref_logp_sum = sample.token_logprobs[c_idx_in_child].sum().item()
+                r_ref_logp_sum = sample.token_logprobs[r_idx_in_child].sum().item()
+                
+                chosen_ref_logps_list.append(c_ref_logp_sum)
+                rejected_ref_logps_list.append(r_ref_logp_sum)
                 
                 # Get base trajectory up to parent
                 base_traj = tree.get_trajectory(parent_node_idx).trajectory
@@ -121,6 +132,9 @@ def get_dpo_collate_fn(model: TransformersModelV2, dpo_dataset_config: DPOTreeDa
             "rejected_attention_mask": r_attn,
             "rejected_pixel_values": r_pixels,
             "rejected_image_grid_thw": r_grid,
+            
+            "chosen_ref_logps": torch.tensor(chosen_ref_logps_list, dtype=torch.float),
+            "rejected_ref_logps": torch.tensor(rejected_ref_logps_list, dtype=torch.float),
         }
 
         if "mm_token_type_ids" in chosen_samples[0]:
@@ -171,25 +185,15 @@ def forward_pass_dpo(model: TransformersModelV2, batch: dict, device: str, is_tr
     if "rejected_mm_token_type_ids" in batch:
         r_kwargs["mm_token_type_ids"] = batch["rejected_mm_token_type_ids"].to(device)
 
-    with torch.no_grad():
-        with model.peft_model.disable_adapter():
-            ref_c_outputs = model.peft_model(**c_kwargs)
-            ref_r_outputs = model.peft_model(**r_kwargs)
-            
-            ref_c_logps = get_batch_logps(ref_c_outputs.logits, c_kwargs["labels"])
-            ref_r_logps = get_batch_logps(ref_r_outputs.logits, r_kwargs["labels"])
-
-    if is_train:
-        model.peft_model.train()
-    else:
-        model.peft_model.eval()
-
     with torch.set_grad_enabled(is_train):
         pol_c_outputs = model.peft_model(**c_kwargs)
         pol_r_outputs = model.peft_model(**r_kwargs)
         
         pol_c_logps = get_batch_logps(pol_c_outputs.logits, c_kwargs["labels"])
         pol_r_logps = get_batch_logps(pol_r_outputs.logits, r_kwargs["labels"])
+
+    ref_c_logps = batch["chosen_ref_logps"].to(device)
+    ref_r_logps = batch["rejected_ref_logps"].to(device)
 
     pi_logratios = pol_c_logps - pol_r_logps
     ref_logratios = ref_c_logps - ref_r_logps

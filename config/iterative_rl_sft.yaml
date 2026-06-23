@@ -48,7 +48,7 @@ clarification_model:
     lora_id: qwen_3_vl_32b_clarification_lora_bfloat16
     lora_id_postfix: "_rl_sft_iter_0" # Dynamic, but starts at 0
     training_config:
-      epochs: 1
+      epochs: 2
       evaluate_first: false
       fallback_on_no_improvement: "first_epoch"
       seed: 42
@@ -83,10 +83,10 @@ sft_dataset:
 
 paths:
   data:
-    trees_subpath: sft/v0/rl_sft
+    trees_subpath: sft/v1_2_epochs/rl_sft
   checkpoints:
-    loras_subpath: sft/v0/loras
-    merged_models_subpath: v5/merged_models
+    loras_subpath: sft/v1_2_epochs/loras
+    merged_models_subpath: v2/merged_models
 
 runtime_meta:
   git_commit: null

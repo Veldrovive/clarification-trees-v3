@@ -36,8 +36,20 @@ async def run_iterative_loop(cfg: IterativeRLDPOConfig, raw_cfg: DictConfig):
         cfg.clarification_model.lora_config.lora_id_postfix = f"_rl_dpo_iter_{cfg.start_iter - 1}"
 
     async with use_models(cfg) as (cq_model, answer_model):
+        if cfg.stop_vllm_during_dpo:
+            if not cq_model.is_running_internally or not answer_model.is_running_internally:
+                raise ValueError("Cannot use stop_vllm_during_dpo=True when vLLM servers are managed externally.")
+
         for iter_number in range(cfg.start_iter, cfg.max_iters):
             logger.info(f"=== Starting Iteration {iter_number} ===")
+            
+            if cfg.stop_vllm_during_dpo:
+                if not cq_model.is_running:
+                    logger.info("Restarting cq_model vLLM server...")
+                    await cq_model.initialize_server()
+                if not answer_model.is_running:
+                    logger.info("Restarting answer_model vLLM server...")
+                    await answer_model.initialize_server()
             
             # --- LoRA Swapping Phase ---
             if iter_number > cfg.start_iter:
@@ -90,6 +102,18 @@ async def run_iterative_loop(cfg: IterativeRLDPOConfig, raw_cfg: DictConfig):
 
             # --- Phase 2: DPO Training ---
             logger.info(f"Phase 2: DPO Training for iteration {iter_number}...")
+            
+            if cfg.stop_vllm_during_dpo:
+                logger.info("Stopping vLLM servers to free memory for DPO...")
+                cq_model.stop_server()
+                answer_model.stop_server()
+                
+                # Force cleanup
+                import gc
+                import torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             # Set the environment variable for construct_model_with_lora
             os.environ["ITER_NUMBER"] = str(iter_number)

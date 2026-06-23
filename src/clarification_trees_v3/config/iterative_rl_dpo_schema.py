@@ -18,6 +18,7 @@ class IterativeRLDPOConfig(Config):
     dpo_dataset: DPOTreeDatasetConfig
     eval_trees_per_iteration: int = 50
     beta: float = 0.1
+    stop_vllm_during_dpo: bool = False
 
 def parse_iterative_rl_dpo_config(cfg: DictConfig) -> IterativeRLDPOConfig:
     """Parse the Hydra config into a Pydantic IterativeRLDPOConfig object."""
