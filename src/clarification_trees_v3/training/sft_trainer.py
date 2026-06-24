@@ -20,8 +20,11 @@ from clarification_trees_v3.definitions import BASE_WEIGHTS_PATH
 from logging import getLogger
 logger = getLogger(__name__)
 
-def get_collate_fn(model: TransformersModelV2):
-    def clarification_sample_collate(batch: list[ClearVQASample | SFTClarificationTreeSample]):
+class ClarificationSampleCollate:
+    def __init__(self, model: TransformersModelV2):
+        self.model = model
+
+    def __call__(self, batch: list[ClearVQASample | SFTClarificationTreeSample]):
         processed_samples = []
         
         for sample in batch:
@@ -41,7 +44,7 @@ def get_collate_fn(model: TransformersModelV2):
                 trajectory = tree.get_trajectory(cq)
 
                 # Process to tokens in such a way that all labels are masked except the clarifying question
-                tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
+                tokenized = self.model.preprocess_sft_training_inputs(trajectory, role="user")
                 processed_samples.append(tokenized)
             elif isinstance(sample, SFTClarificationTreeSample):
                 trajectory = DialogTrajectory()
@@ -50,7 +53,7 @@ def get_collate_fn(model: TransformersModelV2):
                 target_node = DialogNode(NodeType.CLARIFICATION_QUESTION, None, None, sample.target)
                 trajectory.trajectory.insert(0, target_node)
                 
-                tokenized = model.preprocess_sft_training_inputs(trajectory, role="user")
+                tokenized = self.model.preprocess_sft_training_inputs(trajectory, role="user")
                 processed_samples.append(tokenized)
             else:
                 raise ValueError(f"Unknown sample type: {type(sample)}")
@@ -58,7 +61,7 @@ def get_collate_fn(model: TransformersModelV2):
         input_ids = [s["input_ids"] for s in processed_samples]
         labels = [s["labels"] for s in processed_samples]
 
-        pad_token_id = model.processor.tokenizer.pad_token_id
+        pad_token_id = self.model.processor.tokenizer.pad_token_id
 
         input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
         labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100)
@@ -84,7 +87,8 @@ def get_collate_fn(model: TransformersModelV2):
 
         return processed_batch
 
-    return clarification_sample_collate
+def get_collate_fn(model: TransformersModelV2):
+    return ClarificationSampleCollate(model)
 
 def evaluate(model: TransformersModelV2, val_loader: DataLoader, device: str, step_id: int, eval_batches: int | None = None, iter_number: int | None = None):
     assert model.peft_model is not None, "No adapter is currently loaded or constructed."
@@ -399,8 +403,8 @@ def construct_model_with_lora(model_config: schema.HuggingfaceClarificationModel
     assert model.peft_model is not None, "No adapter was constructed."
     
     train_p, tot_p = model.peft_model.get_nb_trainable_parameters()
-    print(f'Trainable parameters:      {train_p/1e6:.2f}M')
-    print(f'Total parameters:          {tot_p/1e6:.2f}M')
-    print(f'% of trainable parameters: {100*train_p/tot_p:.2f}%')
+    logger.info(f'Trainable parameters:      {train_p/1e6:.2f}M')
+    logger.info(f'Total parameters:          {tot_p/1e6:.2f}M')
+    logger.info(f'% of trainable parameters: {100*train_p/tot_p:.2f}%')
 
     return model

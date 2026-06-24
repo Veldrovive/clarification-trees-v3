@@ -1,9 +1,10 @@
 seed: 42
 
 max_iters: 10
-trees_per_iteration: 500
-eval_trees_per_iteration: 100
+trees_per_iteration: 100
+min_eval_trees_per_iteration: 100
 start_iter: 0
+concurrent_eval_trees: true
 stop_vllm_during_sft: false
 vllm_restart_delay: 30
 
@@ -18,21 +19,23 @@ dialog_tree:
 devices:
   clarification: [2]
   answer: [1]
-  semantic_cluster: [0]
+  semantic_cluster: [2]
   sft: [0]
 
 remote_vllm:
   clarification:
     port: 29002
-    gpu_memory_utilization: 0.90
+    gpu_memory_utilization: 0.85
     max_lora_rank: 16
     max_model_len: 4096
+    max_num_seqs: 25
     log_file: "clarification_vllm_remote_sft.log"
   answer:
     port: 29003
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
+    max_num_seqs: 25
     log_file: "answer_vllm_remote_sft.log"
 
 defaults:
@@ -75,18 +78,18 @@ clarification_model:
         - down_proj
 
 sft_dataset:
-  advantage_threshold: 0.75
+  advantage_threshold: 0.5
   min_reward_threshold: 0.0
   top_n: null
-  batches_per_epoch: 350
+  batches_per_epoch: 100
   eval_batches_per_epoch: 100
   val_split: 0.1
 
 paths:
   data:
-    trees_subpath: sft/v2_2_epochs/rl_sft
+    trees_subpath: sft/v3_low_trees_low_thresh/rl_sft
   checkpoints:
-    loras_subpath: sft/v2_2_epochs/loras
+    loras_subpath: sft/v3_low_trees_low_thresh/loras
     merged_models_subpath: v2/merged_models
 
 runtime_meta:

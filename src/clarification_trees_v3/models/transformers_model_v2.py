@@ -11,6 +11,9 @@ import peft
 import transformers
 from PIL import Image
 from typing import Literal
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 from typing import TYPE_CHECKING
@@ -49,7 +52,7 @@ class TransformersModelV2:
         self.image_resize_config = self.model_config.image_resize_config
 
         if self.image_resize_config:
-            print(f"Image resizing enabled: {self.image_resize_config}")
+            logger.info(f"Image resizing enabled: {self.image_resize_config}")
 
         self.base_model, self.processor = self._load_base_model(self.model_config, paths_config, self.bnb_config)
 
@@ -77,9 +80,9 @@ class TransformersModelV2:
             raise ImportError("Qwen3VLForConditionalGeneration is not available. Please install transformers.")
 
         if bnb_config is not None:
-            print(f"Loading model with BNB config: {bnb_config}")
+            logger.info(f"Loading model with BNB config: {bnb_config}")
         else:
-            print("Loading model without BNB config")
+            logger.info("Loading model without BNB config")
         
         desired_dtype = model_config.torch_dtype if model_config.torch_dtype is not None else "auto"
         base_model_path = schema.resolve_base_model_path(model_config.base_model_source, paths_config)
@@ -123,7 +126,7 @@ class TransformersModelV2:
         model = prepare_model_for_kbit_training(self.base_model)
         
         lora_config_obj = PeftLoraConfig(**lora_config.model_dump())
-        print(f"Adding LoRA to model with config: {lora_config_obj}")
+        logger.info(f"Adding LoRA to model with config: {lora_config_obj}")
 
         if self.peft_model is None:
             # Then this is the first adapter on the model
@@ -138,7 +141,7 @@ class TransformersModelV2:
         """
         Loads a LoRA adapter from a path and applies it to the base model.
         """
-        print(f"Loading adapter from {adapter_load_dir}")
+        logger.info(f"Loading adapter from {adapter_load_dir}")
         assert adapter_load_dir.exists(), f"Adapter not found at {adapter_load_dir}"
         if self.peft_model is None:
             # Then this is the first adapter on the model
@@ -155,13 +158,6 @@ class TransformersModelV2:
             # Then this is an additional adapter on the model
             self.peft_model.load_adapter(adapter_load_dir.absolute().as_posix(), adapter_name=adapter_name, is_trainable=is_trainable)
 
-        # Manually set the requires grad flag based on the is_trainable flag and the adapter name
-        # We need to do this because PEFT doesn't seem to do it correctly when loading multiple
-        # I think really you should just keep it to one adapter with PEFT if possible
-        # for name, param in self.peft_model.named_parameters():
-        #     if adapter_name in name:
-        #         param.requires_grad = is_trainable
-
     def save_adapter(self, adapter_save_dir: Path, adapter_name: str) -> None:
         """
         Saves the LoRA adapter to a path.
@@ -169,7 +165,7 @@ class TransformersModelV2:
         if self.peft_model is None:
             raise ValueError("No PEFT model is loaded. Please construct a LoRA adapter first.")
         
-        print(f"Saving adapter to {adapter_save_dir}")
+        logger.info(f"Saving adapter to {adapter_save_dir}")
         self.peft_model.save_pretrained(adapter_save_dir.absolute().as_posix(), adapter_name=adapter_name)
 
     ### GENERATION & DIALOG TREE ###
@@ -370,7 +366,7 @@ class TransformersModelV2:
 
         child_datapoints: List["TransformersModelV2.RLTrainingDatapoint"] = []
         for child_node_idx in child_cq_idxs:
-            advantage = sidecar.get_node_advantage(child_node_idx, cfg=None)
+            advantage = sidecar.get_node_advantage(child_node_idx)
 
             old_tokens_and_logprobs = sidecar.get_node_logprobs(child_node_idx)
             old_tokens = torch.tensor([token for token, logprob in old_tokens_and_logprobs], dtype=torch.long)

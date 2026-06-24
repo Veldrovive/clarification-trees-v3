@@ -1,5 +1,6 @@
 import shutil
 import random
+import asyncio
 from pathlib import Path
 from logging import getLogger
 from omegaconf import DictConfig
@@ -37,75 +38,47 @@ def get_lora_path(save_dir: Path) -> Path | None:
         return save_dir / "best_adapter"
     return None
 
-async def run_phase_1_tree_generation(
+async def run_train_tree_generation(
     cfg,
     raw_cfg: DictConfig,
     iter_number: int,
     iter_trees_subpath: str,
     out_dir: Path,
     ds: ClearVQADataset,
-    val_ds: ClearVQADataset,
     cq_model,
     answer_model,
     sentence_analyzer: SentenceAnalyzer
 ):
     assert GENERATED_TREES_PATH is not None
 
-    logger.info(f"Phase 1: Generating trees for iteration {iter_number}...")
+    logger.info(f"Phase 1: Generating train trees for iteration {iter_number}...")
     check_and_clean_malformed_trees(out_dir)
     existing_count = get_completed_trees_count(out_dir)
     trees_to_generate = cfg.trees_per_iteration - existing_count
     
-    eval_trees_subpath = f"{cfg.paths.data.trees_subpath}_eval_iter_{iter_number}"
-    eval_out_dir = GENERATED_TREES_PATH / eval_trees_subpath
-    eval_out_dir.mkdir(parents=True, exist_ok=True)
-    check_and_clean_malformed_trees(eval_out_dir)
-    eval_existing_count = get_completed_trees_count(eval_out_dir)
-    eval_trees_to_generate = getattr(cfg, 'eval_trees_per_iteration', 50) - eval_existing_count
-
-    if trees_to_generate > 0 or eval_trees_to_generate > 0:
-        logger.info("Loading semantic clusterer for tree generation...")
+    if trees_to_generate > 0:
+        logger.info("Loading semantic clusterer for train tree generation...")
         clusterer_gpus = cfg.devices.semantic_cluster
         clusterer = construct_semantic_clusterer(raw_cfg.semantic_cluster_model, f"cuda:{clusterer_gpus[0]}")
         
-        if trees_to_generate > 0:
-            logger.info(f"Need to generate {trees_to_generate} more train trees to reach {cfg.trees_per_iteration}.")
-            rng = random.Random(cfg.seed + iter_number)
-            indices = rng.sample(range(len(ds)), trees_to_generate)
-            await process_dataset_lazily(
-                cfg=cfg,
-                dataset=ds,
-                indices=indices,
-                clusterer=clusterer,
-                cq_model=cq_model,
-                answer_model=answer_model,
-                sentence_analyzer=sentence_analyzer,
-                N_parallel_trees=25,
-                out_dir=out_dir
-            )
-            print_timer_tree()
-        else:
-            logger.info(f"Already have {existing_count} train trees for iteration {iter_number}. Skipping generation.")
-
-        if eval_trees_to_generate > 0:
-            logger.info(f"Need to generate {eval_trees_to_generate} more val trees.")
-            rng = random.Random(42)
-            eval_indices = rng.sample(range(len(val_ds)), min(getattr(cfg, 'eval_trees_per_iteration', 50), len(val_ds)))
-            
-            await process_dataset_lazily(
-                cfg=cfg,
-                dataset=val_ds,
-                indices=eval_indices,
-                clusterer=clusterer,
-                cq_model=cq_model,
-                answer_model=answer_model,
-                sentence_analyzer=sentence_analyzer,
-                N_parallel_trees=25,
-                out_dir=eval_out_dir
-            )
-            print_timer_tree()
-        else:
-            logger.info(f"Already have {eval_existing_count} val trees. Skipping.")
+        logger.info(f"Need to generate {trees_to_generate} more train trees to reach {cfg.trees_per_iteration}.")
+        rng = random.Random(cfg.seed + iter_number)
+        indices = rng.sample(range(len(ds)), trees_to_generate)
+        async for _ in process_dataset_lazily(
+            cfg=cfg,
+            dataset=ds,
+            indices=indices,
+            clusterer=clusterer,
+            cq_model=cq_model,
+            answer_model=answer_model,
+            sentence_analyzer=sentence_analyzer,
+            N_parallel_trees=25,
+            out_dir=out_dir,
+            tqdm_desc="Generating Train Trees",
+            tqdm_position=0
+        ):
+            pass
+        print_timer_tree()
 
         logger.info("Unloading semantic clusterer to free memory...")
         del clusterer
@@ -114,7 +87,7 @@ async def run_phase_1_tree_generation(
         gc.collect()
         torch.cuda.empty_cache()
     else:
-        logger.info("All train and val trees already generated. Skipping.")
+        logger.info(f"Already have {existing_count} train trees for iteration {iter_number}. Skipping generation.")
 
     logger.info(f"Generating eval visualizations for train trees iteration {iter_number}...")
     train_eval_output_dir = GENERATED_TREES_PATH / f"{iter_trees_subpath}_train_eval_visualizations"
@@ -122,10 +95,83 @@ async def run_phase_1_tree_generation(
     if df_inf is not None:
         plot_metrics(df_inf, df_qp, df_ent, train_eval_output_dir)
 
+    return df_inf, df_qp, df_ent
+
+async def run_eval_tree_generation_concurrent(
+    cfg,
+    raw_cfg: DictConfig,
+    iter_number: int,
+    eval_trees_subpath: str,
+    eval_out_dir: Path,
+    val_ds: ClearVQADataset,
+    cq_model,
+    answer_model,
+    sentence_analyzer: SentenceAnalyzer,
+    training_done_event: asyncio.Event
+):
+    assert GENERATED_TREES_PATH is not None
+
+    logger.info(f"Eval Tree Generation Loop for iteration {iter_number}...")
+    check_and_clean_malformed_trees(eval_out_dir)
+    existing_count = get_completed_trees_count(eval_out_dir)
+    
+    # We will loop as long as:
+    # 1. We haven't hit the minimum trees needed, OR
+    # 2. Training hasn't finished.
+    # We cap at len(val_ds)
+    min_trees_needed = getattr(cfg, 'min_eval_trees_per_iteration', 25)
+    
+    if existing_count < len(val_ds):
+        logger.info("Loading semantic clusterer for eval tree generation...")
+        clusterer_gpus = cfg.devices.semantic_cluster
+        clusterer = construct_semantic_clusterer(raw_cfg.semantic_cluster_model, f"cuda:{clusterer_gpus[0]}")
+        
+        rng = random.Random(42)
+        # We need an order of indices to evaluate
+        all_eval_indices = rng.sample(range(len(val_ds)), len(val_ds))
+        
+        # Determine remaining indices to evaluate based on how many we already generated
+        target_indices = all_eval_indices[existing_count:]
+        
+        if target_indices:
+            logger.info(f"Generating eval trees. Current count: {existing_count}. Min target: {min_trees_needed}. Training done: {training_done_event.is_set()}")
+            
+            async for _ in process_dataset_lazily(
+                cfg=cfg,
+                dataset=val_ds,
+                indices=target_indices,
+                clusterer=clusterer,
+                cq_model=cq_model,
+                answer_model=answer_model,
+                sentence_analyzer=sentence_analyzer,
+                N_parallel_trees=25,
+                out_dir=eval_out_dir,
+                tqdm_desc="Generating Eval Trees",
+                tqdm_position=1
+            ):
+                existing_count += 1
+                
+                if existing_count >= len(val_ds):
+                    logger.info("All val dataset indices explored. Breaking eval loop.")
+                    break
+                    
+                if training_done_event.is_set() and existing_count >= min_trees_needed:
+                    logger.info(f"Training done and min eval trees ({min_trees_needed}) reached. Breaking eval loop.")
+                    break
+        logger.info("Unloading semantic clusterer from eval generation to free memory...")
+        del clusterer
+        import gc
+        import torch
+        gc.collect()
+        torch.cuda.empty_cache()
+        print_timer_tree()
+    else:
+        logger.info(f"Already have {existing_count} val trees (max possible). Skipping eval generation.")
+
     logger.info(f"Generating eval visualizations for val trees iteration {iter_number}...")
     val_eval_output_dir = GENERATED_TREES_PATH / f"{eval_trees_subpath}_eval_visualizations"
     df_inf_val, df_qp_val, df_ent_val = gather_statistics(eval_out_dir)
     if df_inf_val is not None:
         plot_metrics(df_inf_val, df_qp_val, df_ent_val, val_eval_output_dir)
 
-    return df_inf, df_qp, df_ent, df_inf_val, df_qp_val, df_ent_val
+    return df_inf_val, df_qp_val, df_ent_val

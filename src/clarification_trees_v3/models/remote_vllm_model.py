@@ -33,6 +33,8 @@ class RemoteVLLMModel:
         port: int = 29002,
         startup_timeout: int = 60*50,
         max_lora_rank: int = 64,
+        max_num_seqs: int | None = None,
+        max_num_batched_tokens: int | None = None,
         log_file: Path | None = None,
         environment_path: Path | None = None,
         debug: bool = False
@@ -69,6 +71,8 @@ class RemoteVLLMModel:
         self.port = port
         self.startup_timeout = startup_timeout
         self.max_lora_rank = max_lora_rank
+        self.max_num_seqs = max_num_seqs
+        self.max_num_batched_tokens = max_num_batched_tokens
         self.log_file = log_file
         self.environment_path = environment_path  # Like "./venv"
         self.debug = debug
@@ -188,6 +192,11 @@ class RemoteVLLMModel:
             "--enable-lora",
             "--max-lora-rank", str(self.max_lora_rank)
         ]
+
+        if self.max_num_seqs is not None:
+            command.extend(["--max-num-seqs", str(self.max_num_seqs)])
+        if self.max_num_batched_tokens is not None:
+            command.extend(["--max-num-batched-tokens", str(self.max_num_batched_tokens)])
 
         if self.log_file is not None:
             self.log_file.parent.mkdir(parents=True, exist_ok=True)

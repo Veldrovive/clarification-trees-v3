@@ -232,6 +232,8 @@ async def process_dataset_lazily(
     sentence_analyzer: SentenceAnalyzer,
     out_dir: Path,
     N_parallel_trees: int = 10,
+    tqdm_position: int = 0,
+    tqdm_desc: str = "Expanding Trees"
 ):
     # Configuration
     if indices is None:
@@ -243,22 +245,68 @@ async def process_dataset_lazily(
     active_tasks = set()
     
     # Initialize progress bar
-    pbar = tqdm(total=total_items, desc="Expanding Trees")
+    pbar = tqdm(total=total_items, desc=tqdm_desc, position=tqdm_position, smoothing=0.0)
 
     n_done = 0
-    for i in indices:
-        # 1. THROTTLING: If we are full, wait for at least one task to finish
-        if len(active_tasks) >= N_parallel_trees:
-            # wait returns two sets: 'done' tasks and 'pending' tasks
+    iterator = iter(indices)
+
+    try:
+        while True:
+            # 1. THROTTLING: Load more tasks up to N_parallel_trees
+            while len(active_tasks) < N_parallel_trees:
+                try:
+                    i = next(iterator)
+                except StopIteration:
+                    break
+                
+                # LAZY LOADING: The image is loaded into memory HERE, not before.
+                sample = dataset[i]
+                tree = DialogTree(
+                    init_question=sample.blurred_question,
+                    init_image=None,
+                    init_image_path=sample.image_path,
+                    init_image_caption=sample.caption,
+                    unambiguous_question=sample.question,
+                    gold_answer=sample.gold_answer,
+                    answers=sample.answers
+                )
+
+                # DISPATCH: Create the coroutine and track it
+                img_path = tree.init_image_path
+                if img_path is None:
+                    out_dir_i = out_dir / f"tree_{uuid.uuid4()}"
+                else:
+                    img_name = img_path.stem
+                    out_dir_i = out_dir / f"tree_{img_name}_{uuid.uuid4()}"
+                out_dir_i.mkdir(parents=True, exist_ok=True)
+                task = asyncio.create_task(
+                    expand_tree(
+                        cfg=cfg,
+                        tree=tree,
+                        clusterer=clusterer,
+                        cq_model=cq_model,
+                        answer_model=answer_model,
+                        sentence_analyzer=sentence_analyzer,
+                        out_dir=out_dir_i,
+                        seed=getattr(cfg, 'seed', 42) + i
+                    )
+                )
+                active_tasks.add(task)
+
+            if not active_tasks:
+                break
+
+            # 2. Wait for at least one task to finish
             done, pending = await asyncio.wait(
                 active_tasks, 
                 return_when=asyncio.FIRST_COMPLETED
             )
             
-            # 2. CLEANUP: Process finished tasks and remove from active set
+            # 3. CLEANUP: Process finished tasks and remove from active set
             for task in done:
                 try:
-                    finished_tree_paths, finished_sidecar_path = await task # Retrieve the result (or raise exception)
+                    finished_tree_paths, finished_sidecar_path = await task # Retrieve the result
+                    yield finished_tree_paths, finished_sidecar_path
                 except Exception as e:
                     print(f"Task failed: {e}")
                 finally:
@@ -272,52 +320,13 @@ async def process_dataset_lazily(
             # Update active_tasks to only contain the ones still running
             active_tasks = pending
 
-        # 3. LAZY LOADING: Now that we have a slot, load the data
-        # The image is loaded into memory HERE, not before.
-        sample = dataset[i]
-        tree = DialogTree(
-            init_question=sample.blurred_question,
-            init_image=None,
-            init_image_path=sample.image_path,
-            init_image_caption=sample.caption,
-            unambiguous_question=sample.question,
-            gold_answer=sample.gold_answer,
-            answers=sample.answers
-        )
-
-        # 4. DISPATCH: Create the coroutine and track it
-        # We wrap it in a task immediately
-        img_path = tree.init_image_path
-        if img_path is None:
-            out_dir_i = out_dir / f"tree_{uuid.uuid4()}"
-        else:
-            img_name = img_path.stem
-            out_dir_i = out_dir / f"tree_{img_name}_{uuid.uuid4()}"
-        out_dir_i.mkdir(parents=True, exist_ok=True)
-        task = asyncio.create_task(
-            expand_tree(
-                cfg=cfg,
-                tree=tree,
-                clusterer=clusterer,
-                cq_model=cq_model,
-                answer_model=answer_model,
-                sentence_analyzer=sentence_analyzer,
-                out_dir=out_dir_i,
-                seed=getattr(cfg, 'seed', 42) + i
-            )
-        )
-        active_tasks.add(task)
-
-    # 5. DRAIN: Wait for the final batch of tasks to finish after the loop
-    if active_tasks:
-        done, _ = await asyncio.wait(active_tasks)
-        for task in done:
-            try:
-                finished_tree_paths = await task
-            except Exception as e:
-                print(f"Task failed: {e}")
-            pbar.update(1)
-    pbar.close()
+    finally:
+        # 4. DRAIN/CANCEL: Wait for remaining tasks to be cancelled if exited early
+        for task in active_tasks:
+            task.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+        pbar.close()
 
 def print_timer_tree():
     data = Timer.timers

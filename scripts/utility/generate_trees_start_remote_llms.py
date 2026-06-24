@@ -23,13 +23,15 @@ async def start_servers(cfg: Config):
     clarification_model_log_file = Path(cfg.remote_vllm.clarification.log_file)
     answer_model_log_file = Path(cfg.remote_vllm.answer.log_file)
 
-    async def _start_vllm_server(model_cfg, gpus: list[int], port: int, log_file: Path):
+    async def _start_vllm_server(model_cfg, gpus: list[int], port: int, log_file: Path, vllm_cfg):
         model = RemoteVLLMModel(
             model_cfg,
             cfg.paths,
             lora_checkpoint_path,
             gpus=gpus,
             port=port,
+            max_num_seqs=vllm_cfg.max_num_seqs,
+            max_num_batched_tokens=vllm_cfg.max_num_batched_tokens,
             log_file=log_file
         )
         print(f"Initializing server on port {port} with GPUs {gpus}...")
@@ -42,13 +44,15 @@ async def start_servers(cfg: Config):
             clarification_model_cfg,
             clarification_model_gpus,
             clarification_model_port,
-            clarification_model_log_file
+            clarification_model_log_file,
+            cfg.remote_vllm.clarification
         ),
         _start_vllm_server(
             answer_model_cfg,
             answer_model_gpus,
             answer_model_port,
-            answer_model_log_file
+            answer_model_log_file,
+            cfg.remote_vllm.answer
         )
     )
 

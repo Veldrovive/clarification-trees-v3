@@ -65,7 +65,7 @@ async def run_expand_trees(cfg: Config, raw_cfg: DictConfig, ds: ClearVQADataset
 
     async with use_models(cfg, raw_cfg) as (cq_model, answer_model, clusterer):
         with Timer("total"):
-            await process_dataset_lazily(
+            async for _ in process_dataset_lazily(
                 cfg=cfg,
                 dataset=ds,
                 indices=None,
@@ -75,7 +75,8 @@ async def run_expand_trees(cfg: Config, raw_cfg: DictConfig, ds: ClearVQADataset
                 sentence_analyzer=sentence_analyzer,
                 N_parallel_trees=n_parallel_trees,
                 out_dir=out_dir
-            )
+            ):
+                pass
 
     print_timer_tree()
 

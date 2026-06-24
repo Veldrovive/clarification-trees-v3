@@ -8,6 +8,11 @@ import hydra
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 import copy
+import torch
+import wandb
+import gc
+import multiprocessing as mp
+import logging
 
 from clarification_trees_v3.config.iterative_rl_sft_schema import IterativeRLSFTConfig, parse_iterative_rl_sft_config
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH, BASE_WEIGHTS_PATH
@@ -26,7 +31,8 @@ from clarification_trees_v3.training.iterative_utils import (
     check_and_clean_malformed_trees,
     get_completed_trees_count,
     get_lora_path,
-    run_phase_1_tree_generation
+    run_train_tree_generation,
+    run_eval_tree_generation_concurrent
 )
 
 def run_sft_training_process(
@@ -39,17 +45,6 @@ def run_sft_training_process(
     wandb_run_id: str | None,
     wandb_project: str | None
 ):
-    import os
-    import copy
-    import random
-    from pathlib import Path
-    import torch
-    from torch.utils.data import DataLoader
-    from clarification_trees_v3.config.iterative_rl_sft_schema import IterativeRLSFTConfig
-    from clarification_trees_v3.training.sft_trainer import get_collate_fn, train_loop, construct_model_with_lora
-    from clarification_trees_v3.dataset.dataset import SFTClarificationTreeDataset
-    
-    import wandb
     if wandb_run_id and wandb_project:
         wandb.init(project=wandb_project, id=wandb_run_id, resume="must")
 
@@ -104,7 +99,8 @@ def run_sft_training_process(
         collate_fn=collate_fn, 
         shuffle=True,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
+        multiprocessing_context="fork"
     )
     val_loader = DataLoader(
         sft_val_ds, 
@@ -112,23 +108,34 @@ def run_sft_training_process(
         collate_fn=collate_fn, 
         shuffle=False,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
+        multiprocessing_context="fork"
     )
 
-    train_loop(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        model_config=cfg.clarification_model,
-        sft_dataset_config=cfg.sft_dataset,
-        save_dir=save_dir,
-        iter_number=iter_number
-    )
-
+    try:
+        train_loop(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            model_config=cfg.clarification_model,
+            sft_dataset_config=cfg.sft_dataset,
+            save_dir=save_dir,
+            iter_number=iter_number
+        )
+    finally:
+        if wandb.run is not None:
+            wandb.finish()
 
 async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
     assert GENERATED_TREES_PATH is not None
     assert BASE_WEIGHTS_PATH is not None
+
+    if getattr(cfg, 'concurrent_eval_trees', False):
+        if cfg.stop_vllm_during_sft:
+            raise ValueError("Cannot use concurrent_eval_trees=True when stop_vllm_during_sft=True.")
+        vllm_devices = set(cfg.devices.clarification) | set(cfg.devices.answer)
+        if set(cfg.devices.sft).intersection(vllm_devices):
+            raise ValueError("Cannot use concurrent_eval_trees=True when SFT shares GPUs with vLLM servers.")
 
     sentence_analyzer = SentenceAnalyzer()
     ds = ClearVQADataset(load_images=False, table_name="train_annotated.jsonl")
@@ -192,55 +199,93 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 logger.info(f"LoRA for iteration {iter_number} already exists at {current_lora_path}. Skipping to next iteration.")
                 continue
 
-            # --- Phase 1: Tree Generation ---
-            df_inf, df_qp, df_ent, df_inf_val, df_qp_val, df_ent_val = await run_phase_1_tree_generation(
+            # --- Phase 1: Train Tree Generation ---
+            df_inf, df_qp, df_ent = await run_train_tree_generation(
                 cfg=cfg,
                 raw_cfg=raw_cfg,
                 iter_number=iter_number,
                 iter_trees_subpath=iter_trees_subpath,
                 out_dir=out_dir,
                 ds=ds,
-                val_ds=val_ds,
                 cq_model=cq_model,
                 answer_model=answer_model,
                 sentence_analyzer=sentence_analyzer
             )
 
-            import wandb
             if wandb.run is not None:
-                metrics = {"iteration": iter_number}
+                train_metrics = {"iteration": iter_number}
                 
                 # Train metrics
                 if df_inf is not None and not df_inf.empty:
                     for depth in sorted(df_inf['Depth'].unique()):
                         depth_scores = df_inf[df_inf['Depth'] == depth]['Score']
-                        metrics[f"train/avg_reward_at_depth_{depth}"] = depth_scores.mean()
-                        metrics[f"train/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
+                        train_metrics[f"train/avg_reward_at_depth_{depth}"] = depth_scores.mean()
+                        train_metrics[f"train/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
                 if df_qp is not None and not df_qp.empty:
                     for depth in sorted(df_qp['Depth'].unique()):
                         depth_scores = df_qp[df_qp['Depth'] == depth]['Score']
-                        metrics[f"train/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
+                        train_metrics[f"train/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
                 if df_ent is not None and not df_ent.empty:
                     for depth in sorted(df_ent['Depth'].unique()):
                         depth_scores = df_ent[df_ent['Depth'] == depth]['Score']
-                        metrics[f"train/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
+                        train_metrics[f"train/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
                         
-                # Val metrics
-                if df_inf_val is not None and not df_inf_val.empty:
-                    for depth in sorted(df_inf_val['Depth'].unique()):
-                        depth_scores = df_inf_val[df_inf_val['Depth'] == depth]['Score']
-                        metrics[f"val/avg_reward_at_depth_{depth}"] = depth_scores.mean()
-                        metrics[f"val/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
-                if df_qp_val is not None and not df_qp_val.empty:
-                    for depth in sorted(df_qp_val['Depth'].unique()):
-                        depth_scores = df_qp_val[df_qp_val['Depth'] == depth]['Score']
-                        metrics[f"val/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
-                if df_ent_val is not None and not df_ent_val.empty:
-                    for depth in sorted(df_ent_val['Depth'].unique()):
-                        depth_scores = df_ent_val[df_ent_val['Depth'] == depth]['Score']
-                        metrics[f"val/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
-                        
-                wandb.log(metrics)
+                wandb.log(train_metrics, commit=False)
+
+            # --- Setup Eval Tree Generation ---
+            eval_trees_subpath = f"{cfg.paths.data.trees_subpath}_eval_iter_{iter_number}"
+            eval_out_dir = GENERATED_TREES_PATH / eval_trees_subpath
+            eval_out_dir.mkdir(parents=True, exist_ok=True)
+            
+            training_done_event = asyncio.Event()
+            eval_task = None
+            if getattr(cfg, 'concurrent_eval_trees', False):
+                logger.info("Starting concurrent eval tree generation task...")
+                eval_task = asyncio.create_task(run_eval_tree_generation_concurrent(
+                    cfg=cfg,
+                    raw_cfg=raw_cfg,
+                    iter_number=iter_number,
+                    eval_trees_subpath=eval_trees_subpath,
+                    eval_out_dir=eval_out_dir,
+                    val_ds=val_ds,
+                    cq_model=cq_model,
+                    answer_model=answer_model,
+                    sentence_analyzer=sentence_analyzer,
+                    training_done_event=training_done_event
+                ))
+            else:
+                logger.info("Generating eval trees sequentially before SFT...")
+                training_done_event.set()
+                df_inf_val, df_qp_val, df_ent_val = await run_eval_tree_generation_concurrent(
+                    cfg=cfg,
+                    raw_cfg=raw_cfg,
+                    iter_number=iter_number,
+                    eval_trees_subpath=eval_trees_subpath,
+                    eval_out_dir=eval_out_dir,
+                    val_ds=val_ds,
+                    cq_model=cq_model,
+                    answer_model=answer_model,
+                    sentence_analyzer=sentence_analyzer,
+                    training_done_event=training_done_event
+                )
+                
+                if wandb.run is not None:
+                    val_metrics = {"iteration": iter_number}
+                    if df_inf_val is not None and not df_inf_val.empty:
+                        for depth in sorted(df_inf_val['Depth'].unique()):
+                            depth_scores = df_inf_val[df_inf_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_reward_at_depth_{depth}"] = depth_scores.mean()
+                            val_metrics[f"val/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
+                    if df_qp_val is not None and not df_qp_val.empty:
+                        for depth in sorted(df_qp_val['Depth'].unique()):
+                            depth_scores = df_qp_val[df_qp_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
+                    if df_ent_val is not None and not df_ent_val.empty:
+                        for depth in sorted(df_ent_val['Depth'].unique()):
+                            depth_scores = df_ent_val[df_ent_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
+                            
+                    wandb.log(val_metrics)
 
             # --- Phase 2: SFT Training ---
             logger.info(f"Phase 2: SFT Training for iteration {iter_number}...")
@@ -251,8 +296,6 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                 answer_model.stop_server()
                 
                 # Force cleanup
-                import gc
-                import torch
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -265,11 +308,12 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             # Set the environment variable for construct_model_with_lora
             os.environ["ITER_NUMBER"] = str(iter_number)
             
-            import multiprocessing as mp
-            import wandb
-            
             wandb_run_id = wandb.run.id if wandb.run is not None else None
             wandb_project = cfg.wandb.project
+            wandb_name = wandb.run.name if wandb.run is not None else None
+            
+            if wandb.run is not None:
+                wandb.finish()
             
             logger.info("Starting SFT training in a separate process...")
             ctx = mp.get_context("spawn")
@@ -293,6 +337,32 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
             if p.exitcode != 0:
                 raise RuntimeError(f"SFT training process failed with exit code {p.exitcode}")
+
+            if wandb_run_id is not None:
+                wandb.init(project=wandb_project, id=wandb_run_id, resume="must", name=wandb_name)
+
+            if eval_task is not None:
+                logger.info("SFT training process completed. Waiting for eval tree generation to finish...")
+                training_done_event.set()
+                df_inf_val, df_qp_val, df_ent_val = await eval_task
+                
+                if wandb.run is not None:
+                    val_metrics = {"iteration": iter_number}
+                    if df_inf_val is not None and not df_inf_val.empty:
+                        for depth in sorted(df_inf_val['Depth'].unique()):
+                            depth_scores = df_inf_val[df_inf_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_reward_at_depth_{depth}"] = depth_scores.mean()
+                            val_metrics[f"val/prob_correct_at_depth_{depth}"] = (float)((depth_scores >= 1.0).mean())
+                    if df_qp_val is not None and not df_qp_val.empty:
+                        for depth in sorted(df_qp_val['Depth'].unique()):
+                            depth_scores = df_qp_val[df_qp_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_qp_cost_at_depth_{depth}"] = depth_scores.mean()
+                    if df_ent_val is not None and not df_ent_val.empty:
+                        for depth in sorted(df_ent_val['Depth'].unique()):
+                            depth_scores = df_ent_val[df_ent_val['Depth'] == depth]['Score']
+                            val_metrics[f"val/avg_ent_cost_at_depth_{depth}"] = depth_scores.mean()
+                            
+                    wandb.log(val_metrics)
                 
             if cfg.stop_vllm_during_sft:
                 logger.info(f"Waiting {cfg.vllm_restart_delay} seconds for memory to clear before restarting vLLM...")
@@ -303,17 +373,15 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
 @hydra.main(config_path="../../config", config_name="iterative_rl_sft", version_base=None)
 def main(raw_cfg: DictConfig):
-    import logging
     logging.getLogger("httpx").setLevel(logging.WARNING)
     
     cfg: IterativeRLSFTConfig = parse_iterative_rl_sft_config(raw_cfg)
-    print(f"Running Iterative RL SFT with config:\n{cfg.model_dump_json(indent=2)}")
+    logger.info(f"Running Iterative RL SFT with config:\n{cfg.model_dump_json(indent=2)}")
     
     set_seed(cfg.seed)
     
     # Enable W&B if needed, but since it loops, we can init here.
     # W&B can log multiple steps over time.
-    import wandb
     wandb_name = cfg.wandb.name if cfg.wandb.name else f"iterative_rl_sft_{cfg.clarification_model.lora_config.lora_id}"
     wandb.init(
         project=cfg.wandb.project,

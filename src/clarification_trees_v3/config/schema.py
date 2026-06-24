@@ -24,6 +24,8 @@ class RemoteVLLMConfig(BaseModel):
     gpu_memory_utilization: float = 0.90
     max_lora_rank: int = 16
     max_model_len: int = 4096
+    max_num_seqs: int | None = None
+    max_num_batched_tokens: int | None = None
     log_file: str
 
 class RemoteVLLMConfigs(BaseModel):

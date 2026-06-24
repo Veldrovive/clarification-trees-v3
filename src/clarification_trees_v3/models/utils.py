@@ -18,19 +18,19 @@ async def use_models(cfg: Config):
     answer_model_cfg = cfg.answer_model
     clarification_model_gpus = cfg.devices.clarification
     answer_model_gpus = cfg.devices.answer
-    clarification_model_port = cfg.remote_vllm.clarification.port
-    answer_model_port = cfg.remote_vllm.answer.port
-    clarification_model_log_file = Path(cfg.remote_vllm.clarification.log_file)
-    answer_model_log_file = Path(cfg.remote_vllm.answer.log_file)
-
-    async def _start_vllm_server(model_cfg, gpus: list[int], port: int, log_file: Path):
+    async def _start_vllm_server(model_cfg, gpus: list[int], vllm_cfg):
         model = RemoteVLLMModel(
             model_cfg,
             cfg.paths,
             lora_checkpoint_path,
             gpus=gpus,
-            port=port,
-            log_file=log_file
+            port=vllm_cfg.port,
+            gpu_memory_utilization=vllm_cfg.gpu_memory_utilization,
+            max_model_len=vllm_cfg.max_model_len,
+            max_lora_rank=vllm_cfg.max_lora_rank,
+            max_num_seqs=vllm_cfg.max_num_seqs,
+            max_num_batched_tokens=vllm_cfg.max_num_batched_tokens,
+            log_file=Path(vllm_cfg.log_file)
         )
         await model.initialize_server()
         return model
@@ -39,14 +39,12 @@ async def use_models(cfg: Config):
         _start_vllm_server(
             clarification_model_cfg,
             clarification_model_gpus,
-            clarification_model_port,
-            clarification_model_log_file
+            cfg.remote_vllm.clarification
         ),
         _start_vllm_server(
             answer_model_cfg,
             answer_model_gpus,
-            answer_model_port,
-            answer_model_log_file
+            cfg.remote_vllm.answer
         )
     )
 
