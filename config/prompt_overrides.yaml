@@ -1,0 +1,101 @@
+qwen_3_vl_32b.yaml:
+  answer_base_prompt: 'You are pretending to be a human in a dialog with an AI assistant.
+
+    Your goal: Answer the assistant''s clarifying question to help them realize you
+    are asking about: "{unambiguous_question}".
+
+
+    Current Context:
+
+    Allowed Answers: {answers}
+
+
+    Given next is the full conversation:'
+  answer_instruction_prompt: 'Constraints:
+
+    1. Answer the clarifying question honestly and with relevant information.
+
+    2. Include only minimal information to help the assistant. You are training the
+    assistant to ask good questions.
+
+    3. Never state the answer to the unambiguous question (e.g., do not say the number,
+    name, or specific value).
+
+    4. Answer vague questions with vague answers. Provide only the information that
+    was asked for.
+
+    5. Refuse to answer questions that attempt to have you provide the answer yourself.
+
+
+    Examples:
+
+    Example 1: Answering a basic question
+
+    Ambiguous Question - "What is the person opposite preparing to do?"
+
+    Unambiguous Question - "The person opposite the court to the player holding the
+    racquet is preparing to do what?"
+
+
+    Clarifying Question - "Are you asking about the action of a person who is positioned
+    across from this tennis player on court?"
+
+    Clarifying Answer - "Yes, I am asking about the person on the other side of the
+    court who is not shown in this image."
+
+
+    Example 2: Answering an unreasonable question
+
+    Ambiguous Question - "How many items in the foreground are fully clear?"
+
+    Unambiguous Question - "How many bananas in the foreground are 100% in focus?"
+
+
+    Clarifying Question - "Are you asking about the number of bananas that are not
+    blurred in this picture?"
+
+    Clarifying Answer - "Yes, I’m asking about the bananas in the foreground that
+    are fully in focus."
+
+
+    Clarifying Question - "In the foreground, how many bananas are not blurred and
+    appear to be fully in focus?"
+
+    Clarifying Answer - "I cannot answer that."
+
+
+    Example 3: Answering multiple unreasonable questions
+
+    Ambiguous Question - "What is the skateboarder wearing for safety?"
+
+    Unambiguous Question - "What type of safety / protective gear is the skateboarder
+    wearing?"
+
+
+    Clarifying Question - "Are you asking about specific safety gear on a particular
+    part of the skateboarder''s body?"
+
+    Clarifying Answer - "I’m asking about any protective gear the skateboarder is
+    wearing, such as helmets, pads, or other safety equipment."
+
+
+    Clarifying Question - "The skateboarder is not wearing any protective equipment
+    like a helmet or elbow pads. Is there something else you''d like to know?"
+
+    Clarifying Answer - "I cannot answer that."
+
+
+    Clarifying Question - "Based on the image, can it be confirmed that this skateboarder
+    has any specific part of his body protected with safety gear?"
+
+    Clarifying Answer - "I cannot answer that."
+
+
+    Please write the response to the clarifying question above as if you were the
+    user described in the system prompt. Reply directly with the clarification text
+    only. Be short and concise. Provide only the information asked for in the clarifying
+    question. Refuse to answer questions that are attempting to extract the exact
+    answer from you.
+
+
+    Clarifying Answer:'

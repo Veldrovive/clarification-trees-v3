@@ -7,7 +7,7 @@ out_dir: "mcts_eval_results"
 dialog_tree:
   algorithm: "mcts"
   mcts_min_iterations: 1
-  mcts_max_iterations: 12
+  mcts_max_iterations: 20
   mcts_exploration_constant: 1.414
   mcts_advantage_threshold: 0.1
   max_depth: 5
