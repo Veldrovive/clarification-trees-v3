@@ -1,0 +1,66 @@
+seed: 42
+
+c_values: [0.0, 0.1, 1.414, 5.0]
+num_trees_per_c: 100
+out_dir: "mcts_eval_results"
+
+dialog_tree:
+  algorithm: "mcts"
+  mcts_min_iterations: 1
+  mcts_max_iterations: 12
+  mcts_exploration_constant: 1.414
+  mcts_advantage_threshold: 0.1
+  max_depth: 5
+  question_expansion_factor: 3
+  answer_expansion_factor: 1
+  question_diverse_sample_count: 5
+  answer_diverse_sample_count: 5
+  inference_diverse_sample_count: 5
+
+devices:
+  clarification: [4]
+  answer: [5]
+  semantic_cluster: [4]
+  sft: null
+
+remote_vllm:
+  clarification:
+    port: 29002
+    gpu_memory_utilization: 0.85
+    max_lora_rank: 16
+    max_model_len: 4096
+    max_num_seqs: 25
+    log_file: "clarification_vllm_remote_eval.log"
+  answer:
+    port: 29003
+    gpu_memory_utilization: 0.90
+    max_lora_rank: 16
+    max_model_len: 4096
+    max_num_seqs: 25
+    log_file: "answer_vllm_remote_eval.log"
+
+defaults:
+  - clarification_model/base: qwen_3_vl_32b_merged_bfloat16
+  - clarification_model/lora: qwen_3_vl_32b_lora_bfloat16
+  - answer_model/base: qwen_3_vl_32b
+  - semantic_cluster_model: bidirectional_entailment_clusterer
+  - _self_
+
+clarification_model:
+  lora_config:
+    lora_id: qwen_3_vl_32b_clarification_lora_bfloat16_rl_sft_iter_4
+
+paths:
+  data:
+    trees_subpath: eval/mcts_eval
+  checkpoints:
+    loras_subpath: sft/v2_2_epochs/loras
+    merged_models_subpath: v2/merged_models
+
+runtime_meta:
+  git_commit: null
+  git_strict: false
+
+wandb:
+  project: "mcts-eval-tree"
+  name: null

@@ -4,6 +4,7 @@ weights/
 wandb/
 
 *.log
+mcts_eval_results*/
 
 # Python-generated files
 __pycache__/

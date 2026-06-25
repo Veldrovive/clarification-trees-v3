@@ -272,6 +272,9 @@ class BidirectionalEntailmentClusterer(Clusterer):
         Returns:
             A list of floats, where each float is the entailment probability of the corresponding statement.
         """
+        if not statements:
+            return []
+            
         entailment_scores = self.model.predict(
             statements,
             batch_size=512,
@@ -297,6 +300,9 @@ class BidirectionalEntailmentClusterer(Clusterer):
         Returns:
             A list of floats, where each float is the biconditional entailment of the corresponding statement.
         """
+        if not statements:
+            return []
+            
         inputs = []
         for i in range(len(statements)):
             inputs.append([statements[i][0], statements[i][1]])

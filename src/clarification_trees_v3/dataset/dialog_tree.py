@@ -421,16 +421,18 @@ class TreeSidecar:
                 previous_entailed_node_id = node_id
             current_node_scores.append(entailment_score)
         
-        max_entailment_score = max(current_node_scores)
-        # The entailment score is the probability that the second sentence is entailed by the first
-        # So we take 1 - max_entailment_score to get the probability that the second sentence is not entailed by the first so that higher is better
-        assert previous_entailed_node_id is not None
-        entailment_costs[previous_entailed_node_id] = float(np.clip(-max_entailment_score.item(), -1, 0))
+        if len(current_node_scores) > 0:
+            max_entailment_score = max(current_node_scores)
+            # The entailment score is the probability that the second sentence is entailed by the first
+            # So we take 1 - max_entailment_score to get the probability that the second sentence is not entailed by the first so that higher is better
+            assert previous_entailed_node_id is not None
+            entailment_costs[previous_entailed_node_id] = float(np.clip(-max_entailment_score.item(), -1, 0))
 
         self.entailment_costs = entailment_costs
 
-    async def compute_all_scores(self, answer_model: "RemoteVLLMModel", sentence_analyzer: "SentenceAnalyzer", clusterer: "BidirectionalEntailmentClusterer", cfg: schema.Config):
-        tree = DialogTree.load(self.tree_path)
+    async def compute_all_scores(self, answer_model: "RemoteVLLMModel", sentence_analyzer: "SentenceAnalyzer", clusterer: "BidirectionalEntailmentClusterer", cfg: schema.Config, tree: DialogTree | None = None):
+        if tree is None:
+            tree = DialogTree.load(self.tree_path)
         with Timer("reward/inference_score", logger=None):
             await self._compute_inference_scores(tree, answer_model, cfg)
         with Timer("reward/question_presence_score", logger=None):
@@ -508,7 +510,8 @@ class TreeSidecar:
 
         # Step 1: Compute the std of all rewards in the tree
         std = np.std(list(rewards.values()))
-        assert std > 0, f"Standard deviation of rewards is {std}. It must be greater than 0."
+        if std == 0:
+            std = 1.0  # Avoid division by zero; advantage will be 0 anyway since (reward - mean) == 0
 
         # Step 2: Iterate over all nodes in the tree to find those that have children that are clarifying questions
         seen_parent_ids = set()

@@ -13,6 +13,12 @@ class DialogTreeConfig(BaseModel):
     answer_diverse_sample_count: int = 5
     inference_diverse_sample_count: int = 5
 
+    algorithm: Literal["dfs", "mcts"] = "dfs"
+    mcts_min_iterations: int = 10
+    mcts_max_iterations: int = 50
+    mcts_exploration_constant: float = 1.414
+    mcts_advantage_threshold: float = 0.1
+
 class DevicesConfig(BaseModel):
     clarification: list[int]
     answer: list[int]
