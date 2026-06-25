@@ -1,0 +1,220 @@
+# @package answer_model
+model_type: huggingface
+model_name: qwen-3-vl-32b
+base_model_source:
+  source_type: huggingface
+  huggingface_key: Qwen/Qwen3-VL-32B-Instruct
+use_flash_attention: false
+max_new_tokens: 128
+answer_base_prompt: 'You are pretending to be a human in a dialog with an AI assistant.
+  Your goal: Answer the assistant''s clarifying question to help them realize you are asking about: "{unambiguous_question}".
+
+  CRITICAL RULE: You must never state the final answer to the unambiguous question. 
+  - If the assistant asks you to look at the image and provide the answer yourself (e.g., "What is the name of the berry?", "How many X are there?"), you must reply exactly with: "I cannot answer that." 
+  - However, if the assistant asks to clarify your intent or topic (e.g., "Are you asking about the vitamins?", "Are you asking about X?"), you MUST answer them helpfully to guide them to your true question.
+  - If they finally guess your exact unambiguous question, confirm they are correct by saying something like "Yes. Exactly."
+
+  Constraints:
+  1. Answer the clarifying question honestly and with relevant information.
+  2. Include only minimal information to help the assistant. You are training the assistant to ask good questions. Do not volunteer information that was not requested.
+  3. Never state the answer to the unambiguous question.
+  4. Answer vague questions with vague answers. Provide only the information that was asked for.
+  5. Refuse to answer questions that attempt to have you provide the answer yourself by replying: "I cannot answer that."
+
+  Examples:
+  Example 1: Answering a basic question
+  Ambiguous Question - "What is the person opposite preparing to do?"
+  Unambiguous Question - "The person opposite the court to the player holding the racquet is preparing to do what?"
+
+  Clarifying Question - "Are you asking about the action of a person who is positioned across from this tennis player on court?"
+  Clarifying Answer - "Yes, I am asking about the person on the other side of the court who is not shown in this image."
+
+  Example 2: Redirecting a wrong guess
+  Ambiguous Question - "What are these used for?"
+  Unambiguous Question - "What is the primary material used to construct these tools?"
+
+  Clarifying Question - "Are you asking about the specific brand of these items?"
+  Clarifying Answer - "No, I am not asking about the brand. I want to know about what material they are made of."
+
+  Example 3: Answering an unreasonable question
+  Ambiguous Question - "How many items in the foreground are fully clear?"
+  Unambiguous Question - "How many bananas in the foreground are 100% in focus?"
+
+  Clarifying Question - "In the foreground, how many bananas are not blurred and appear to be fully in focus?"
+  Clarifying Answer - "I cannot answer that."
+
+  Example 4: Recovering from a refusal to correct intent
+  Ambiguous Question - "How fast is it going?"
+  Unambiguous Question - "What is the approximate speed of the car in miles per hour?"
+
+  Clarifying Question - "Based on the motion blur, how fast do you think this vehicle is moving?"
+  Clarifying Answer - "I cannot answer that."
+
+  Clarifying Question - "Would you like me to estimate the speed of the vehicle in kilometers per hour?"
+  Clarifying Answer - "No, I am asking for the estimated speed in miles per hour."
+
+  Example 5: Correcting an assumption while adding detail
+  Ambiguous Question - "What''s in between them?"
+  Unambiguous Question - "What almost empty condiment bottle is in between the cat and man?"
+
+  Clarifying Question - "The object between them is a bottle of hot sauce. Do you want details on any specific aspect?"
+  Clarifying Answer - "Actually, I am trying to find out what kind of almost empty condiment bottle it is."
+
+  Given next is the full conversation:
+  '
+answer_instruction_prompt: 'Please write the response to the clarifying question above as if you were the human user described in the system prompt. Reply directly with the clarification text only. Be short and concise. Provide only the information asked for in the clarifying question.
+
+  Clarifying Answer:
+  '
+inference_base_prompt: 'You are an agent in dialog with a user who has asked a question
+  about an image.
+
+  You will now attempt to answer the user''s question given the dialog history.
+
+
+  Constraints:
+
+  1. You provide a single answer to the user''s question.
+
+  2. You should answer in a few words only.
+
+  3. You must immediately answer the question with no follow-up questions.
+
+  '
+inference_instruction_prompt: 'Please write the response to the user''s question above
+  as if you were the user described in the system prompt. Reply directly with the
+  answer text only. Be short and concise. Answers should be a couple of words only.
+
+  '
+judge_prompts:
+  n_judgements: 5
+  base_prompt: 'You are an expert evaluator for a Visual Question Answering (VQA)
+    system. Your task is to score how well a machine-generated "Inference Response"
+    answers a specific "Unambiguous Question" given a "Gold Answer" and context.
+
+
+    **Evaluation Criteria:**
+
+    - **Accuracy (10/10):** The response matches the Gold Answer in meaning and factuality.
+
+    - **Partial Accuracy (5-6/10):** The response contains the correct answer but
+    also includes incorrect information or distractors.
+
+    - **Equivalent Meaning (9-10/10):** The response is phrased differently but means
+    exactly the same thing as the Gold Answer in this context.
+
+    - **Incorrect (0/10):** The response is factually wrong, irrelevant, or answers
+    a different interpretation of the question.
+
+
+    **Input Data:**
+
+    - **Unambiguous Question:** The precise question being asked.
+
+    - **Gold Answer:** The correct ground truth.
+
+    - **Image Caption:** Context from the image.
+
+    - **Inference Response:** The answer generated by the model.
+
+
+    **Examples:**
+
+
+    Example 1:
+
+    Unambiguous Question: What are the clear circles on the front of the car made
+    of?
+
+    Gold Answer: glass
+
+    Image Caption: a blue and white truck parked next to a crowd of people
+
+    Inference Response: Metal and paint.
+
+    Reasoning: Neither metal nor paint are correct or equivalent to glass.
+
+    Score: 0
+
+
+    Example 2:
+
+    Unambiguous Question: What are the clear circles on the front of the car made
+    of?
+
+    Gold Answer: glass
+
+    Image Caption: a blue and white truck parked next to a crowd of people
+
+    Inference Response: Glass and metal.
+
+    Reasoning: Glass is correct, but metal is incorrect.
+
+    Score: 5
+
+
+    Example 3:
+
+    Unambiguous Question: Where should the reflective items on the peoples high foreheads
+    really be?
+
+    Gold Answer: over eyes
+
+    Image Caption: a man posing with a child on skis
+
+    Inference Response: On their heads, above eyes.
+
+    Reasoning: Answer is equivalent to correct answer
+
+    Score: 10
+
+
+    Example 4:
+
+    Unambiguous Question: There is a large white structure with which animal directly
+    in front of it?
+
+    Gold Answer: zebra
+
+    Image Caption: a giraffe standing in the middle of a lush green field
+
+    Inference Response: Giraffe
+
+    Reasoning: The giraffe is present, but not in front of the white structure
+
+    Score: 0
+
+    '
+  instruction_prompt: '**Current Task:**
+
+    Unambiguous Question: {unambiguous_question}
+
+    Gold Answer: {gold_answer}
+
+    All Human Answers: {answers}
+
+    Image Caption: {caption}
+
+    Inference Response: {inference_response}
+
+
+    **Output Format:**
+
+    Reasoning: [One very short sentence explaining the judgement. Maximum 10 words]
+
+    Score: [0-10]
+
+    '
+image_resize_config:
+  width: 512
+  height: 512
+  pad_color:
+  - 0
+  - 0
+  - 0
+
+bnb_config:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: float32
