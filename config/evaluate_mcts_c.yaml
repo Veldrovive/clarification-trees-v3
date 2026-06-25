@@ -25,18 +25,18 @@ devices:
 
 remote_vllm:
   clarification:
-    port: 29002
+    port: 29008
     gpu_memory_utilization: 0.85
     max_lora_rank: 16
     max_model_len: 4096
-    max_num_seqs: 25
+    max_num_seqs: 50
     log_file: "clarification_vllm_remote_eval.log"
   answer:
-    port: 29003
+    port: 29009
     gpu_memory_utilization: 0.90
     max_lora_rank: 16
     max_model_len: 4096
-    max_num_seqs: 25
+    max_num_seqs: 50
     log_file: "answer_vllm_remote_eval.log"
 
 defaults:

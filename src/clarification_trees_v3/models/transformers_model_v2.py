@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from clarification_trees_v3.dataset.dialog_tree import DialogTrajectory, DialogTree, TreeSidecar
+    from clarification_trees_v3.dataset.dialog_tree import DialogTrajectory, DialogTree
 from clarification_trees_v3.dataset.dialog_tree import NodeType
 from clarification_trees_v3 import utils
 import clarification_trees_v3.config.schema as schema
@@ -319,7 +319,7 @@ class TransformersModelV2:
         prompt_pixel_values: torch.Tensor  # Handled by the tokenizer. We don't look at it.
         prompt_image_grid: torch.Tensor  # Handled by the tokenizer. We don't look at it.
 
-    def preprocess_rl_training_inputs(self, parent_node_idx: int, tree: "DialogTree", sidecar: "TreeSidecar", role: Literal["user", "assistant"]) -> tuple[List["TransformersModelV2.RLTrainingDatapoint"], float, float]:
+    def preprocess_rl_training_inputs(self, parent_node_idx: int, tree: "DialogTree", role: Literal["user", "assistant"]) -> tuple[List["TransformersModelV2.RLTrainingDatapoint"], float, float]:
         """
         Extracts the different possible children of the parent node and extracts the values
         relevant to the GRPO training step.
@@ -366,9 +366,13 @@ class TransformersModelV2:
 
         child_datapoints: List["TransformersModelV2.RLTrainingDatapoint"] = []
         for child_node_idx in child_cq_idxs:
-            advantage = sidecar.get_node_advantage(child_node_idx)
+            child_node = tree.get_node(child_node_idx)
+            advantage = child_node.advantage
 
-            old_tokens_and_logprobs = sidecar.get_node_logprobs(child_node_idx)
+            old_tokens_and_logprobs = child_node.token_logprobs
+            if old_tokens_and_logprobs is None:
+                raise ValueError(f"Logprobs for node {child_node_idx} not found. Please ensure node is for the correct tree and data is not malformed.")
+            
             old_tokens = torch.tensor([token for token, logprob in old_tokens_and_logprobs], dtype=torch.long)
             old_log_probs = torch.tensor([logprob for token, logprob in old_tokens_and_logprobs], dtype=torch.float)
 

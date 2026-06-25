@@ -4,7 +4,7 @@ import seaborn as sns
 from tqdm import tqdm
 from pathlib import Path
 
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, TreeSidecar, NodeType
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType
 
 def calculate_node_depths(tree: DialogTree) -> dict[int, int]:
     """
@@ -38,57 +38,45 @@ def gather_statistics(base_dir: Path):
     qp_records = []
     entailment_records = []
     
-    # Recursively find all tree_sidecar.json files
-    sidecar_paths = list(base_dir.rglob("tree_sidecar.json"))
+    # Recursively find all tree.json files instead of sidecars
+    tree_paths = list(base_dir.rglob("tree.json"))
     
-    if not sidecar_paths:
-        print(f"No sidecar files found in {base_dir}")
+    if not tree_paths:
+        print(f"No tree files found in {base_dir}")
         return None, None, None
 
-    for sidecar_path in tqdm(sidecar_paths, desc="Processing trees"):
-        # The sidecar stores the path to its corresponding tree
-        tree_path = sidecar_path.parent / "tree.json"
-        if not tree_path.exists():
-            print(f"Warning: Could not find tree for {sidecar_path}")
-            continue
-                
-        # Load tree and sidecar and compute depths
+    for tree_path in tqdm(tree_paths, desc="Processing trees"):
+        # Load tree and compute depths
         tree = DialogTree.load(tree_path, load_images=False)
-        sidecar = TreeSidecar.load(sidecar_path)
         depths = calculate_node_depths(tree)
         tree_id = tree_path.parent.name # Useful for tracking which tree data came from
-        
-        # Extract scores
-        inf_scores = sidecar.inference_scores
-        qp_costs = sidecar.question_presence_costs
-        ent_costs = sidecar.entailment_costs
         
         for node_idx, depth in depths.items():
             node = tree.get_node(node_idx)
             
             if node.node_type == NodeType.INFERENCE:
-                if node_idx in inf_scores:
+                if node.inference_score is not None:
                     inference_records.append({
                         "Tree_ID": tree_id,
                         "Node_ID": node_idx,
                         "Depth": depth,
-                        "Score": inf_scores[node_idx]
+                        "Score": node.inference_score
                     })
                     
             elif node.node_type == NodeType.CLARIFICATION_QUESTION:
-                if node_idx in qp_costs:
+                if node.question_presence_cost is not None:
                     qp_records.append({
                         "Tree_ID": tree_id,
                         "Node_ID": node_idx,
                         "Depth": depth,
-                        "Score": qp_costs[node_idx]
+                        "Score": node.question_presence_cost
                     })
-                if node_idx in ent_costs:
+                if node.entailment_cost is not None:
                     entailment_records.append({
                         "Tree_ID": tree_id,
                         "Node_ID": node_idx,
                         "Depth": depth,
-                        "Score": ent_costs[node_idx]
+                        "Score": node.entailment_cost
                     })
 
     # Convert to DataFrames

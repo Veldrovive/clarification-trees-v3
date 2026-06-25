@@ -23,7 +23,7 @@ from omegaconf import DictConfig
 from clarification_trees_v3.models import BidirectionalEntailmentClusterer, construct_semantic_clusterer
 from clarification_trees_v3.utils import add_inference_messages, set_seed, add_cq_messages, add_answer_messages, SentenceAnalyzer
 from clarification_trees_v3.dataset.dataset import ClearVQASample, ClearVQADataset
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory
 from clarification_trees_v3.models.remote_vllm_model import RemoteVLLMModel
 from clarification_trees_v3.config.schema import parse_config, Config
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH, BASE_WEIGHTS_PATH

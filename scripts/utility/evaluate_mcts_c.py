@@ -16,7 +16,7 @@ from clarification_trees_v3.dataset.dataset import ClearVQADataset
 from clarification_trees_v3.models.utils import use_models
 from clarification_trees_v3.models import construct_semantic_clusterer
 from clarification_trees_v3.dataset.tree_generation import expand_tree, process_dataset_lazily, print_timer_tree
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, visualize_tree, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, visualize_tree
 
 logger = getLogger(__name__)
 
@@ -78,7 +78,7 @@ async def run_evaluation(cfg: MCTSEvalConfig, raw_cfg: DictConfig):
             logger.info(f"Generating {cfg.num_trees_per_c} trees for c={c} using lazy processing...")
             
             tree_count = 0
-            async for tree_save_path, sidecar_save_path in process_dataset_lazily(
+            async for tree_save_path in process_dataset_lazily(
                 cfg=cfg,
                 dataset=dataset,
                 indices=list(range(cfg.num_trees_per_c)),
@@ -91,9 +91,8 @@ async def run_evaluation(cfg: MCTSEvalConfig, raw_cfg: DictConfig):
                 tqdm_desc=f"Expanding trees for c={c}",
                 tqdm_position=0
             ):
-                # Load tree and sidecar to compute metrics and visualize
+                # Load tree and compute metrics and visualize
                 generated_tree = DialogTree.load(tree_save_path)
-                sidecar = TreeSidecar.load(sidecar_save_path)
                 
                 variance, ratio = compute_spikiness_metrics(generated_tree)
                 
@@ -107,7 +106,7 @@ async def run_evaluation(cfg: MCTSEvalConfig, raw_cfg: DictConfig):
                     "tree_path": str(tree_save_path)
                 })
                 
-                visualize_tree(generated_tree, sidecar, str(tree_save_path.parent / f"{tree_save_path.stem}"), view=False)
+                visualize_tree(generated_tree, str(tree_save_path.parent / f"{tree_save_path.stem}"), view=False)
                 tree_count += 1
                 
             print_timer_tree()

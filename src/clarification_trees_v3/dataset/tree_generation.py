@@ -10,9 +10,9 @@ from rich import print
 from tqdm import tqdm
 
 from clarification_trees_v3.models import BidirectionalEntailmentClusterer
-from clarification_trees_v3.utils import add_inference_messages, add_cq_messages, add_answer_messages, SentenceAnalyzer
+from clarification_trees_v3.utils import add_inference_messages, add_cq_messages, add_answer_messages, SentenceAnalyzer, get_judge_messages, processes_judge_response
 from clarification_trees_v3.dataset.dataset import ClearVQADataset
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, NodeType, DialogTrajectory
 from clarification_trees_v3.models.remote_vllm_model import RemoteVLLMModel
 from clarification_trees_v3.config.schema import Config
 
@@ -107,7 +107,7 @@ class DialogTreeMCTSManager:
             return True
         return False
 
-    def get_next_leaf_to_expand(self, sidecar: TreeSidecar) -> tuple[DialogTrajectory, NodeType, int, list[int]]:
+    def get_next_leaf_to_expand(self) -> tuple[DialogTrajectory, NodeType, int, list[int]]:
         current_node_id = DialogTree.ROOT
         path = [current_node_id]
         
@@ -125,7 +125,7 @@ class DialogTreeMCTSManager:
                 self.dead_nodes.add(current_node_id)
                 if current_node_id == DialogTree.ROOT:
                     return self.dialog_tree.get_trajectory(current_node_id), self.dialog_tree.get_node(current_node_id).node_type, current_node_id, path
-                return self.get_next_leaf_to_expand(sidecar)
+                return self.get_next_leaf_to_expand()
 
             unexpanded_candidates = [ca for ca in valid_candidates if self.visits.get(ca, 0) == 0]
             
@@ -133,7 +133,7 @@ class DialogTreeMCTSManager:
             best_ucb = -np.inf
             
             if unexpanded_candidates:
-                best_ca = min(unexpanded_candidates, key=lambda ca: sidecar.inference_scores.get(ca, 0))
+                best_ca = min(unexpanded_candidates, key=lambda ca: self.dialog_tree.get_node(ca).inference_score or 0.0)
             else:
                 n_parent = self.visits.get(current_node_id, 0)
                 for ca in valid_candidates:
@@ -142,7 +142,7 @@ class DialogTreeMCTSManager:
                     if not ca_cq_children:
                         adv_range = 0
                     else:
-                        rewards = [sidecar.reward_cache.get(cq, 0) for cq in ca_cq_children if cq in sidecar.reward_cache]
+                        rewards = [self.dialog_tree.get_node(cq).reward or 0.0 for cq in ca_cq_children if self.dialog_tree.get_node(cq).reward is not None]
                         adv_range = (max(rewards) - min(rewards)) if rewards else 0
                     
                     ucb = adv_range + self.exploration_constant * np.sqrt(np.log(n_parent) / n_child) if n_child > 0 else np.inf
@@ -155,7 +155,7 @@ class DialogTreeMCTSManager:
                 if not ca_cq_children:
                     adv_range = 0
                 else:
-                    rewards = [sidecar.reward_cache.get(cq, 0) for cq in ca_cq_children if cq in sidecar.reward_cache]
+                    rewards = [self.dialog_tree.get_node(cq).reward or 0.0 for cq in ca_cq_children if self.dialog_tree.get_node(cq).reward is not None]
                     adv_range = (max(rewards) - min(rewards)) if rewards else 0
                     
                 if adv_range < self.advantage_threshold:
@@ -183,7 +183,7 @@ async def expand_tree(
     sentence_analyzer: SentenceAnalyzer,
     out_dir: Path,
     seed: int | None = None
-) -> tuple[Path, Path]:
+) -> Path:
     try:
         local_random = random.Random(seed) if seed is not None else random
         dialog_tree_config = cfg.dialog_tree
@@ -201,7 +201,7 @@ async def expand_tree(
 
         async def _generate_inference(tree: DialogTree, answer_node_ids: list[int], n_outputs: int):
             with Timer("tree/generate_inference", logger=None):
-                for answer_node_id in answer_node_ids:
+                async def _process_inference(answer_node_id):
                     dialog_trajectory = tree.get_trajectory(answer_node_id)
                     messages = dialog_trajectory.to_messages(model_name="qwen-3-vl", use_img_path=True)
                     add_inference_messages(messages, model_cfg=cfg.answer_model)
@@ -216,16 +216,41 @@ async def expand_tree(
                     probabilities = [len(cluster) / len(generated_texts) for cluster in clusters]
 
                     for exemplar, probability in zip(exemplars, probabilities):
-                        tree.add_node(
+                        new_node_id = tree.add_node(
                             parent_idx=answer_node_id,
                             node_type=NodeType.INFERENCE,
                             response=exemplar,
                             transition_prob=probability
                         )
+                        
+                        inference = exemplar.strip().strip(".")
+                        judge_msgs = get_judge_messages(
+                            tree.init_question,
+                            tree.gold_answer,
+                            tree.answers,
+                            tree.init_image_caption,
+                            inference_response=inference,
+                            cfg=cfg
+                        )
+                        n_judgements = cfg.answer_model.judge_prompts.n_judgements
+                        scores_response_obj = await answer_model.generate(judge_msgs, use_lora=False, n_outputs=n_judgements)
+
+                        scores = []
+                        for choice in scores_response_obj.choices:
+                            scores_response = choice.message.content
+                            assert scores_response is not None
+                            reasoning, score = processes_judge_response(scores_response)
+                            scores.append(score)
+                        average_reward = sum(scores) / n_judgements
+                        normed_score = (average_reward - 0) / (10 - 0)
+                        
+                        node = tree.get_node(new_node_id)
+                        node.inference_score = float(np.clip(normed_score, 0, 1))
+                        node.inference_scores_raw = scores
+
+                await asyncio.gather(*[_process_inference(nid) for nid in answer_node_ids])
 
         tree_save_path = out_dir / f"tree.json"
-        sidecar_save_path = out_dir / f"tree_sidecar.json"
-        sidecar = TreeSidecar(tree_save_path)
         with Timer("tree", logger=None):
             # We always start by making an inference from the root node.
             await _generate_inference(tree, [DialogTree.ROOT], inference_diverse_sample_count)
@@ -292,7 +317,62 @@ async def expand_tree(
                 new_node_ids.append(new_node_idx)
 
             for new_node_id, metadata_exemplar in zip(new_node_ids, metadata_exemplars):
-                sidecar.add_logprobs(new_node_id, metadata_exemplar)
+                tree.get_node(new_node_id).token_logprobs = metadata_exemplar
+
+            if output_node_type == NodeType.CLARIFICATION_QUESTION:
+                entailment_pair_node_indices = []
+                enailment_pairs = []
+                for new_node_id, text in zip(new_node_ids, exemplars):
+                    node = tree.get_node(new_node_id)
+                    sentences = sentence_analyzer.analyze_sentences(text)
+                    n_questions = 0
+                    n_long_sentences = 0
+                    for sentence in sentences:
+                        if sentence.is_question:
+                            n_questions += 1
+                        if len(sentence.text.split()) > 25:
+                            n_long_sentences += 1
+                    
+                    if n_questions == 0:
+                        cost = -1.0
+                    elif len(sentences) <= 2:
+                        cost = 0.0
+                    else:
+                        cost = -0.5
+                    cost -= n_long_sentences * 0.15
+                    node.question_presence_cost = cost
+                    
+                    previous_node_id = node_id
+                    found_ancestor = False
+                    while previous_node_id != DialogTree.ROOT:
+                        previous_node_id = tree.nodes[previous_node_id][0]
+                        previous_node = tree.nodes[previous_node_id][1]
+                        if previous_node.node_type == NodeType.CLARIFICATION_QUESTION:
+                            entailment_pair_node_indices.append((previous_node_id, new_node_id))
+                            enailment_pairs.append((previous_node.response, text))
+                            found_ancestor = True
+                    if not found_ancestor:
+                        node.entailment_cost = 0.0
+                
+                if enailment_pairs:
+                    entailment_scores_raw = await clusterer.async_compute_entailments(enailment_pairs)
+                    previous_entailed_node_id = None
+                    current_node_scores = []
+                    for i in range(len(entailment_scores_raw)):
+                        entailment_score = entailment_scores_raw[i]
+                        p_id, n_id = entailment_pair_node_indices[i]
+                        
+                        if n_id != previous_entailed_node_id:
+                            if len(current_node_scores) > 0:
+                                max_entailment_score = max(current_node_scores)
+                                tree.get_node(previous_entailed_node_id).entailment_cost = float(np.clip(-max_entailment_score.item(), -1, 0))
+                            current_node_scores = []
+                            previous_entailed_node_id = n_id
+                        current_node_scores.append(entailment_score)
+                    
+                    if len(current_node_scores) > 0:
+                        max_entailment_score = max(current_node_scores)
+                        tree.get_node(previous_entailed_node_id).entailment_cost = float(np.clip(-max_entailment_score.item(), -1, 0))
 
             return new_node_ids
 
@@ -325,29 +405,29 @@ async def expand_tree(
                 advantage_threshold=cfg.dialog_tree.mcts_advantage_threshold
             )
             while not mcts_manager.is_done():
-                trajectory, node_type, leaf_node_id, path = mcts_manager.get_next_leaf_to_expand(sidecar)
+                trajectory, node_type, leaf_node_id, path = mcts_manager.get_next_leaf_to_expand()
                 if leaf_node_id in mcts_manager.dead_nodes:
                     break # Root is dead
                 
                 new_cq_ids = await _generate_children(leaf_node_id, NodeType.ROOT if node_type == NodeType.ROOT else NodeType.CLARIFYING_ANSWER)
-                all_new_ca_ids = []
-                for cq_id in new_cq_ids:
-                    new_ca_ids = await _generate_children(cq_id, NodeType.CLARIFICATION_QUESTION)
-                    all_new_ca_ids.extend(new_ca_ids)
+                
+                async def _process_ca(cq_id):
+                    return await _generate_children(cq_id, NodeType.CLARIFICATION_QUESTION)
+                    
+                ca_results = await asyncio.gather(*[_process_ca(cq_id) for cq_id in new_cq_ids])
+                all_new_ca_ids = [ca_id for res in ca_results for ca_id in res]
                 
                 if all_new_ca_ids:
                     await _generate_inference(tree, all_new_ca_ids, inference_diverse_sample_count)
                 
-                await sidecar.compute_all_scores(answer_model, sentence_analyzer, clusterer, cfg, tree)
-                sidecar.compute_rewards(tree)
+                tree.compute_rewards()
                 mcts_manager.update_visits(path)
 
-        tree.save(tree_save_path)
         with Timer("reward", logger=None):
-            await sidecar.compute_all_scores(answer_model, sentence_analyzer, clusterer, cfg, tree)
-            sidecar.save(sidecar_save_path)
+            tree.compute_rewards()
+            tree.save(tree_save_path)
 
-        return tree_save_path, sidecar_save_path
+        return tree_save_path
     except Exception as e:
         traceback.print_exc()
         raise e
@@ -436,8 +516,8 @@ async def process_dataset_lazily(
             # 3. CLEANUP: Process finished tasks and remove from active set
             for task in done:
                 try:
-                    finished_tree_paths, finished_sidecar_path = await task # Retrieve the result
-                    yield finished_tree_paths, finished_sidecar_path
+                    finished_tree_path = await task # Retrieve the result
+                    yield finished_tree_path
                 except Exception as e:
                     print(f"Task failed: {e}")
                 finally:

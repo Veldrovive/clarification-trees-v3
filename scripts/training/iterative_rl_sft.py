@@ -237,7 +237,6 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
             eval_out_dir = GENERATED_TREES_PATH / eval_trees_subpath
             eval_out_dir.mkdir(parents=True, exist_ok=True)
             
-            training_done_event = asyncio.Event()
             eval_task = None
             if getattr(cfg, 'concurrent_eval_trees', False):
                 logger.info("Starting concurrent eval tree generation task...")
@@ -250,12 +249,10 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                     val_ds=val_ds,
                     cq_model=cq_model,
                     answer_model=answer_model,
-                    sentence_analyzer=sentence_analyzer,
-                    training_done_event=training_done_event
+                    sentence_analyzer=sentence_analyzer
                 ))
             else:
                 logger.info("Generating eval trees sequentially before SFT...")
-                training_done_event.set()
                 df_inf_val, df_qp_val, df_ent_val = await run_eval_tree_generation_concurrent(
                     cfg=cfg,
                     raw_cfg=raw_cfg,
@@ -265,8 +262,7 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
                     val_ds=val_ds,
                     cq_model=cq_model,
                     answer_model=answer_model,
-                    sentence_analyzer=sentence_analyzer,
-                    training_done_event=training_done_event
+                    sentence_analyzer=sentence_analyzer
                 )
                 
                 if wandb.run is not None:
@@ -343,7 +339,6 @@ async def run_iterative_loop(cfg: IterativeRLSFTConfig, raw_cfg: DictConfig):
 
             if eval_task is not None:
                 logger.info("SFT training process completed. Waiting for eval tree generation to finish...")
-                training_done_event.set()
                 df_inf_val, df_qp_val, df_ent_val = await eval_task
                 
                 if wandb.run is not None:

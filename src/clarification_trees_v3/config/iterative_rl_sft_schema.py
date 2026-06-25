@@ -10,7 +10,7 @@ class IterativeRLSFTConfig(Config):
     trees_per_iteration: int = 500
     start_iter: int = 0
     sft_dataset: SFTTreeDatasetConfig
-    min_eval_trees_per_iteration: int = 100
+    eval_trees_per_iteration: int = 100
     concurrent_eval_trees: bool = True
     stop_vllm_during_sft: bool = False
     vllm_restart_delay: int = 30

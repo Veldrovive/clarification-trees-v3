@@ -106,22 +106,18 @@ async def run_eval_tree_generation_concurrent(
     val_ds: ClearVQADataset,
     cq_model,
     answer_model,
-    sentence_analyzer: SentenceAnalyzer,
-    training_done_event: asyncio.Event
+    sentence_analyzer: SentenceAnalyzer
 ):
     assert GENERATED_TREES_PATH is not None
 
-    logger.info(f"Eval Tree Generation Loop for iteration {iter_number}...")
+    logger.info(f"Eval Tree Generation for iteration {iter_number}...")
     check_and_clean_malformed_trees(eval_out_dir)
     existing_count = get_completed_trees_count(eval_out_dir)
     
-    # We will loop as long as:
-    # 1. We haven't hit the minimum trees needed, OR
-    # 2. Training hasn't finished.
-    # We cap at len(val_ds)
-    min_trees_needed = getattr(cfg, 'min_eval_trees_per_iteration', 25)
+    eval_trees_needed = getattr(cfg, 'eval_trees_per_iteration', 25)
+    trees_to_generate = min(eval_trees_needed - existing_count, len(val_ds) - existing_count)
     
-    if existing_count < len(val_ds):
+    if trees_to_generate > 0:
         logger.info("Loading semantic clusterer for eval tree generation...")
         clusterer_gpus = cfg.devices.semantic_cluster
         clusterer = construct_semantic_clusterer(raw_cfg.semantic_cluster_model, f"cuda:{clusterer_gpus[0]}")
@@ -130,11 +126,11 @@ async def run_eval_tree_generation_concurrent(
         # We need an order of indices to evaluate
         all_eval_indices = rng.sample(range(len(val_ds)), len(val_ds))
         
-        # Determine remaining indices to evaluate based on how many we already generated
-        target_indices = all_eval_indices[existing_count:]
+        # Determine indices to evaluate based on how many we already generated
+        target_indices = all_eval_indices[existing_count:existing_count + trees_to_generate]
         
         if target_indices:
-            logger.info(f"Generating eval trees. Current count: {existing_count}. Min target: {min_trees_needed}. Training done: {training_done_event.is_set()}")
+            logger.info(f"Generating eval trees. Current count: {existing_count}. Target: {eval_trees_needed}.")
             
             async for _ in process_dataset_lazily(
                 cfg=cfg,
@@ -149,15 +145,8 @@ async def run_eval_tree_generation_concurrent(
                 tqdm_desc="Generating Eval Trees",
                 tqdm_position=1
             ):
-                existing_count += 1
+                pass
                 
-                if existing_count >= len(val_ds):
-                    logger.info("All val dataset indices explored. Breaking eval loop.")
-                    break
-                    
-                if training_done_event.is_set() and existing_count >= min_trees_needed:
-                    logger.info(f"Training done and min eval trees ({min_trees_needed}) reached. Breaking eval loop.")
-                    break
         logger.info("Unloading semantic clusterer from eval generation to free memory...")
         del clusterer
         import gc
@@ -166,7 +155,7 @@ async def run_eval_tree_generation_concurrent(
         torch.cuda.empty_cache()
         print_timer_tree()
     else:
-        logger.info(f"Already have {existing_count} val trees (max possible). Skipping eval generation.")
+        logger.info(f"Already have {existing_count} val trees. Skipping eval generation.")
 
     logger.info(f"Generating eval visualizations for val trees iteration {iter_number}...")
     val_eval_output_dir = GENERATED_TREES_PATH / f"{eval_trees_subpath}_eval_visualizations"

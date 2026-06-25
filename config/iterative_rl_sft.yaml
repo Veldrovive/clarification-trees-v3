@@ -2,14 +2,19 @@ seed: 42
 
 max_iters: 10
 trees_per_iteration: 100
-min_eval_trees_per_iteration: 100
+eval_trees_per_iteration: 100
 start_iter: 0
 concurrent_eval_trees: true
 stop_vllm_during_sft: false
 vllm_restart_delay: 30
 
 dialog_tree:
-  max_depth: 3
+  algorithm: "mcts"
+  mcts_min_iterations: 1
+  mcts_max_iterations: 12
+  mcts_exploration_constant: 1.414
+  mcts_advantage_threshold: 0.1
+  max_depth: 5
   question_expansion_factor: 3
   answer_expansion_factor: 1
   question_diverse_sample_count: 5
@@ -87,9 +92,9 @@ sft_dataset:
 
 paths:
   data:
-    trees_subpath: sft/v3_low_trees_low_thresh/rl_sft
+    trees_subpath: sft/v4_mcts/rl_sft
   checkpoints:
-    loras_subpath: sft/v3_low_trees_low_thresh/loras
+    loras_subpath: sft/v4_mcts/loras
     merged_models_subpath: v2/merged_models
 
 runtime_meta:

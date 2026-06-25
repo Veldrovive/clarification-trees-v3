@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from typing import TypedDict
 
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, TreeSidecar, DialogTrajectory
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, DialogTrajectory
 import clarification_trees_v3.config.schema as schema
 
 from clarification_trees_v3.definitions import GENERATED_TREES_PATH, CLEAR_VQA_BASE_PATH
@@ -89,7 +89,6 @@ class ClearVQADataset(Dataset):
 @dataclass
 class ClarificationTreeSample:
     tree: DialogTree
-    tree_sidecar: TreeSidecar
     parent_node_idx: int
     child_node_idxs: list[int]
     advantages: list[float]
@@ -103,7 +102,6 @@ class ClarificationTreeSampleDict(TypedDict):
 
 class ClarificationTreeDataset(Dataset):
     trees: list[DialogTree]
-    sidecars: list[TreeSidecar]
     samples: list[ClarificationTreeSampleDict]
     cached_reward_tree_idxs: set[int]
     
@@ -131,7 +129,6 @@ class ClarificationTreeDataset(Dataset):
 
     def _load_trees(self):
         trees = []
-        sidecars = []
         cached_reward_tree_idxs = set()
 
         samples = []  # [{"tree_idx": int, "parent_node_idx": int, "child_node_idxs": list[int]}]
@@ -156,19 +153,12 @@ class ClarificationTreeDataset(Dataset):
                 print(f"Skipping non-tree {tree_path}")
                 continue
             
-            sidecar_path = tree_dir / "tree_sidecar.json"
-            if not sidecar_path.exists():
-                print(f"Skipping non-sidecar {sidecar_path}")
-                continue
-            
             tree = DialogTree.load(tree_path, load_images=self.load_images)
-            sidecar = TreeSidecar.load(sidecar_path)
             
             tree_idx = len(trees)
             trees.append(tree)
-            sidecars.append(sidecar)
             if self.precompute_rewards:
-                sidecar.compute_rewards(tree)  # Caches the rewards and advantages
+                tree.compute_rewards()  # Caches the rewards and advantages
                 cached_reward_tree_idxs.add(tree_idx)
 
             for parent_node_idx, parent_node in tree.get_nodes():
@@ -179,7 +169,7 @@ class ClarificationTreeDataset(Dataset):
                 if unfiltered_child_size == 0:
                     continue
 
-                child_cq_idxs = [child_node_idx for child_node_idx in child_cq_idxs if sidecar.advantage_cache[child_node_idx] != 0]
+                child_cq_idxs = [child_node_idx for child_node_idx in child_cq_idxs if tree.get_node(child_node_idx).advantage != 0]
                 filtered_child_size = len(child_cq_idxs)
 
                 num_removed_children += unfiltered_child_size - filtered_child_size
@@ -190,7 +180,7 @@ class ClarificationTreeDataset(Dataset):
 
                 # Filter by positive_reward_threshold if provided
                 if self.positive_reward_threshold is not None:
-                    max_reward = max([sidecar.reward_cache[idx] for idx in child_cq_idxs])
+                    max_reward = max([tree.get_node(idx).reward for idx in child_cq_idxs if tree.get_node(idx).reward is not None])
                     if max_reward < self.positive_reward_threshold:
                         continue
 
@@ -198,8 +188,8 @@ class ClarificationTreeDataset(Dataset):
                 if self.require_multiple_children:
                     if len(child_cq_idxs) < 2:
                         continue
-                    rewards = [sidecar.reward_cache[idx] for idx in child_cq_idxs]
-                    if max(rewards) == min(rewards):
+                    rewards = [tree.get_node(idx).reward for idx in child_cq_idxs if tree.get_node(idx).reward is not None]
+                    if len(rewards) == 0 or max(rewards) == min(rewards):
                         continue
             
                 num_parents += 1
@@ -211,7 +201,6 @@ class ClarificationTreeDataset(Dataset):
                 ))
 
         self.trees: list[DialogTree] = trees
-        self.sidecars: list[TreeSidecar] = sidecars
         self.samples: list[ClarificationTreeSampleDict] = samples
         self.cached_reward_tree_idxs: set[int] = cached_reward_tree_idxs
 
@@ -228,23 +217,20 @@ class ClarificationTreeDataset(Dataset):
         parent_node_idx = sample["parent_node_idx"]
         child_node_idxs = sample["child_node_idxs"]
 
+        tree = self.trees[tree_index]
+
         if tree_index not in self.cached_reward_tree_idxs:
-            self.sidecars[tree_index].compute_rewards(self.trees[tree_index])
+            tree.compute_rewards()
             self.cached_reward_tree_idxs.add(tree_index)
 
-        tree = self.trees[tree_index]
-        sidecar = self.sidecars[tree_index]
-
-        child_advantages = [sidecar.advantage_cache[child_node_idx] for child_node_idx in child_node_idxs]
+        child_advantages = [tree.get_node(child_node_idx).advantage for child_node_idx in child_node_idxs]
 
         # extract the logits for the child nodes
-        # child_logits = [sidecar.token_logprobs[child_node_idx] for child_node_idx in child_node_idxs]
-        child_token_values = [torch.Tensor([token_tuple[0] for token_tuple in sidecar.token_logprobs[child_node_idx]]) for child_node_idx in child_node_idxs]
-        child_token_logprobs = [torch.Tensor([token_tuple[1] for token_tuple in sidecar.token_logprobs[child_node_idx]]) for child_node_idx in child_node_idxs]
+        child_token_values = [torch.Tensor([token_tuple[0] for token_tuple in tree.get_node(child_node_idx).token_logprobs]) for child_node_idx in child_node_idxs]
+        child_token_logprobs = [torch.Tensor([token_tuple[1] for token_tuple in tree.get_node(child_node_idx).token_logprobs]) for child_node_idx in child_node_idxs]
 
         return ClarificationTreeSample(
             tree=tree,
-            tree_sidecar=sidecar,
             parent_node_idx=parent_node_idx,
             child_node_idxs=child_node_idxs,
             advantages=child_advantages,
@@ -260,7 +246,6 @@ class SFTClarificationTreeSample:
 
 class SFTClarificationTreeDataset(Dataset):
     trees: list[DialogTree]
-    sidecars: list[TreeSidecar]
     samples: list[dict]
     
     def __init__(self,
@@ -285,7 +270,6 @@ class SFTClarificationTreeDataset(Dataset):
 
     def _load_trees(self):
         trees = []
-        sidecars = []
         samples = []
         total_possible_samples = 0
 
@@ -306,19 +290,12 @@ class SFTClarificationTreeDataset(Dataset):
                 print(f"Skipping non-tree {tree_path}")
                 continue
             
-            sidecar_path = tree_dir / "tree_sidecar.json"
-            if not sidecar_path.exists():
-                print(f"Skipping non-sidecar {sidecar_path}")
-                continue
-            
             tree = DialogTree.load(tree_path, load_images=self.load_images)
-            sidecar = TreeSidecar.load(sidecar_path)
             
             tree_idx = len(trees)
             trees.append(tree)
-            sidecars.append(sidecar)
             
-            sidecar.compute_rewards(tree)
+            tree.compute_rewards()
 
             for parent_node_idx, parent_node in tree.get_nodes():
                 child_cq_idxs = tree.get_children_idxs(parent_node_idx, type_filter=NodeType.CLARIFICATION_QUESTION)
@@ -326,11 +303,11 @@ class SFTClarificationTreeDataset(Dataset):
                 if len(child_cq_idxs) == 0:
                     continue
 
-                child_advantages = [(child_idx, sidecar.advantage_cache[child_idx]) for child_idx in child_cq_idxs]
+                child_advantages = [(child_idx, tree.get_node(child_idx).advantage) for child_idx in child_cq_idxs]
                 total_possible_samples += len(child_advantages)
                 
                 if self.min_reward_threshold is not None:
-                    child_advantages = [x for x in child_advantages if sidecar.reward_cache[x[0]] >= self.min_reward_threshold]
+                    child_advantages = [x for x in child_advantages if tree.get_node(x[0]).reward >= self.min_reward_threshold]
 
                 if self.advantage_threshold is not None:
                     child_advantages = [x for x in child_advantages if x[1] >= self.advantage_threshold]
@@ -347,7 +324,6 @@ class SFTClarificationTreeDataset(Dataset):
             samples = sorted(samples, key=lambda x: x["advantage"], reverse=True)[:self.top_n]
 
         self.trees = trees
-        self.sidecars = sidecars
         self.samples = samples
 
         pct_used = (len(self.samples) / total_possible_samples * 100) if total_possible_samples > 0 else 0.0

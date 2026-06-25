@@ -1,6 +1,6 @@
 from pathlib import Path
 from typer import Typer
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, visualize_tree, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree, visualize_tree
 
 app = Typer()
 
@@ -11,17 +11,10 @@ def main(tree_path: Path, output_path: Path | None = None):
         
     assert tree_path.exists(), "Tree path does not exist"
     tree = DialogTree.load(tree_path)
-    # Look for a sidecar at tree_path.parent / f"{tree_path.stem}_sidecar.json"
-    sidecar_path = tree_path.parent / f"{tree_path.stem}_sidecar.json"
-    
-    if sidecar_path.exists():
-        tree_sidecar = TreeSidecar.load(sidecar_path)
-    else:
-        tree_sidecar = None
 
     if output_path is None:
         output_path = tree_path.parent / f"{tree_path.stem}"
-    visualize_tree(tree, tree_sidecar, str(output_path), view=False)
+    visualize_tree(tree, str(output_path), view=False)
 
 if __name__ == "__main__":
     app()

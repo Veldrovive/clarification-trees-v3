@@ -12,29 +12,28 @@ logger = getLogger(__name__)
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-from clarification_trees_v3.dataset.dialog_tree import DialogTree, TreeSidecar
+from clarification_trees_v3.dataset.dialog_tree import DialogTree
 
 def gather_root_rewards(base_dir: Path):
     """
     Computes the final reward at depth 0 (the root) for all trees in the directory.
     """
     root_records = []
-    sidecar_paths = list(base_dir.rglob("tree_sidecar.json"))
+    tree_paths = list(base_dir.rglob("tree.json"))
     
-    if not sidecar_paths:
+    if not tree_paths:
         return None
 
-    for sidecar_path in tqdm(sidecar_paths, desc="Processing root rewards"):
-        tree_path = sidecar_path.parent / "tree.json"
+    for tree_path in tqdm(tree_paths, desc="Processing root rewards"):
         if not tree_path.exists():
             continue
             
         try:
             tree = DialogTree.load(tree_path, load_images=False)
-            sidecar = TreeSidecar.load(sidecar_path)
-            sidecar.compute_rewards(tree)
+            tree.compute_rewards()
             
-            root_reward = sidecar.reward_cache.get(DialogTree.ROOT, None)
+            root_node = tree.get_node(DialogTree.ROOT)
+            root_reward = root_node.reward
             if root_reward is not None and root_reward != float('-inf'):
                 root_records.append({
                     "Tree_ID": tree_path.parent.name,
